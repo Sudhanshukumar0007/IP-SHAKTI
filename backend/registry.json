@@ -1,0 +1,380 @@
+{
+    "e9313101dbd13466e83a329e95443ad8366d6d3139f0a806bf33fc4a821ab5da": {
+        "act_name": "Ayurvedic Pharmacopoeia Of India Part 1",
+        "jurisdiction": "national",
+        "source_pdf_path": "Corpus/national/ayurvedic-pharmacopoeia-of-india-part-1/base-vol10_2022_en.pdf",
+        "version": "2022",
+        "language": "en",
+        "pdf_hash": "18b7a7ce815d0d7fe44dd777e6f9ed7c6fc9ccc6377b5bbeba3fd49a7cb6bc3f",
+        "ingested_date": "2026-09-02"
+    },
+    "dcc174fa58fa326addaa28bd28a1a51daa1c7a7577bf854a2ad294698092594c": {
+        "act_name": "Ayurvedic Pharmacopoeia Of India Part 1",
+        "jurisdiction": "national",
+        "source_pdf_path": "Corpus/national/ayurvedic-pharmacopoeia-of-india-part-1/base-vol1_1986_en.pdf",
+        "version": "1986",
+        "language": "en",
+        "pdf_hash": "a4b27d3f666f7a3be69ba64b9aff97efcf8aff5631eed81b4785eb7c566442f2",
+        "ingested_date": "2026-09-02"
+    },
+    "fb8f010c5fcb7d8a5571888fcc5348585f2392d964f40084ff2c81bf684ec0a2": {
+        "act_name": "Ayurvedic Pharmacopoeia Of India Part 1",
+        "jurisdiction": "national",
+        "source_pdf_path": "Corpus/national/ayurvedic-pharmacopoeia-of-india-part-1/base-vol2_1999_en.pdf",
+        "version": "1999",
+        "language": "en",
+        "pdf_hash": "48fa7ed0726adb4e0bc5b237b73b28ec4b3f9c330eb68af4e18511093823150c",
+        "ingested_date": "2026-09-02"
+    },
+    "d6df0c052acbf113d13b6906379c31f9c4ad483b1c9433ed116a975c4b3e3a39": {
+        "act_name": "Ayurvedic Pharmacopoeia Of India Part 1",
+        "jurisdiction": "national",
+        "source_pdf_path": "Corpus/national/ayurvedic-pharmacopoeia-of-india-part-1/base-vol3_2001_en.pdf",
+        "version": "2001",
+        "language": "en",
+        "pdf_hash": "1082c143ddc7b81865327be6a70f5954affff47ff478ee89e64772b1c85b70d3",
+        "ingested_date": "2026-09-02"
+    },
+    "2374a77947cb6078448d04ae524c165dd927eff195ed59117e9149045ad0b1d9": {
+        "act_name": "Ayurvedic Pharmacopoeia Of India Part 1",
+        "jurisdiction": "national",
+        "source_pdf_path": "Corpus/national/ayurvedic-pharmacopoeia-of-india-part-1/base-vol4_2004_en.pdf",
+        "version": "2004",
+        "language": "en",
+        "pdf_hash": "375ab205ef493f599d29f24672470c36f83262e46ce63283c0301be46b7bc736",
+        "ingested_date": "2026-09-02"
+    },
+    "81acf05d87b790b1936bc455da7014aa26b0b84bbffc684ea4406e17f8a2332a": {
+        "act_name": "Ayurvedic Pharmacopoeia Of India Part 1",
+        "jurisdiction": "national",
+        "source_pdf_path": "Corpus/national/ayurvedic-pharmacopoeia-of-india-part-1/base-vol5_2006_en.pdf",
+        "version": "2006",
+        "language": "en",
+        "pdf_hash": "40b50a56ea85f68ba20eef3c99a9557a787fd70c70e8299609120f31b4452fd7",
+        "ingested_date": "2026-09-02"
+    },
+    "38f38896fc323285faa6b8680f1d8a2e11da9bb5039ee2fb9dc429e3ebe096d5": {
+        "act_name": "Ayurvedic Pharmacopoeia Of India Part 1",
+        "jurisdiction": "national",
+        "source_pdf_path": "Corpus/national/ayurvedic-pharmacopoeia-of-india-part-1/base-vol6_2008_en.pdf",
+        "version": "2008",
+        "language": "en",
+        "pdf_hash": "49970df621d7399cad09258c812cd852c95a9a93205087a763e3eae2a951d863",
+        "ingested_date": "2026-09-02"
+    },
+    "c04135514b61b2765e3e28ac1cdfd1a5fe13582958624f7b0a65160d8795e96f": {
+        "act_name": "Ayurvedic Pharmacopoeia Of India Part 1",
+        "jurisdiction": "national",
+        "source_pdf_path": "Corpus/national/ayurvedic-pharmacopoeia-of-india-part-1/base-vol7_2008_en.pdf",
+        "version": "2008",
+        "language": "en",
+        "pdf_hash": "d6475f7d02729353953d510ec0cd48968b7905f7635abe364bf84df46f9a07f9",
+        "ingested_date": "2026-09-02"
+    },
+    "d57ac9be216d762a30839a4b2719d57658054d19ded6c5370c09f41385cf30d2": {
+        "act_name": "Ayurvedic Pharmacopoeia Of India Part 1",
+        "jurisdiction": "national",
+        "source_pdf_path": "Corpus/national/ayurvedic-pharmacopoeia-of-india-part-1/base-vol8_2011_en.pdf",
+        "version": "2011",
+        "language": "en",
+        "pdf_hash": "c519d918af13df2cf53fae668d5bd0d99494d59545c04df9372c5ab21b20b5e3",
+        "ingested_date": "2026-09-02"
+    },
+    "3bcf677ab959327f649ce661edea7b4eb5ac054c1373afb840af0cb98b7d279d": {
+        "act_name": "Ayurvedic Pharmacopoeia Of India Part 1",
+        "jurisdiction": "national",
+        "source_pdf_path": "Corpus/national/ayurvedic-pharmacopoeia-of-india-part-1/base-vol9_2016_en.pdf",
+        "version": "2016",
+        "language": "en",
+        "pdf_hash": "8e621a904bd20d4f840f2e889d94066fe15a70014f8cb15a23fadb823861fe80",
+        "ingested_date": "2026-09-02"
+    },
+    "1a471aad88934ba9ecf002e2b9f4f505791ed37d799953167dd406d5cd5d4c09": {
+        "act_name": "Ayurvedic Pharmacopoeia Of India Part 2",
+        "jurisdiction": "national",
+        "source_pdf_path": "Corpus/national/ayurvedic-pharmacopoeia-of-india-part-2/base-vol1_2007_en.pdf",
+        "version": "2007",
+        "language": "en",
+        "pdf_hash": "ac3334b67ec080d8b99481caf3fd42379a1549fe3b0ae796b10dcf1191477073",
+        "ingested_date": "2026-09-02"
+    },
+    "f3652c66479b18a296e6955dc5064151bbdf654fc8f2779076cc1f6afa0812f3": {
+        "act_name": "Ayurvedic Pharmacopoeia Of India Part 2",
+        "jurisdiction": "national",
+        "source_pdf_path": "Corpus/national/ayurvedic-pharmacopoeia-of-india-part-2/base-vol2_2008_en.pdf",
+        "version": "2008",
+        "language": "en",
+        "pdf_hash": "8661d0140707291c3cae3e366d6cfdb5aec563ea884a0abdef46fd0cf4ca4d42",
+        "ingested_date": "2026-09-02"
+    },
+    "be331259634d45c6b39643f02dc63027f14842633dccf4b1744b5f30265870cd": {
+        "act_name": "Ayurvedic Pharmacopoeia Of India Part 2",
+        "jurisdiction": "national",
+        "source_pdf_path": "Corpus/national/ayurvedic-pharmacopoeia-of-india-part-2/base-vol3_2010_en.pdf",
+        "version": "2010",
+        "language": "en",
+        "pdf_hash": "60a7e2a11692077e6d76d7ed743a7227d0709b55cb3528ac39a52809159a90a5",
+        "ingested_date": "2026-09-02"
+    },
+    "6a4abf0998f044914a54b863472310f9945977dc2bd1f11869b3204e8ab9d617": {
+        "act_name": "Ayurvedic Pharmacopoeia Of India Part 2",
+        "jurisdiction": "national",
+        "source_pdf_path": "Corpus/national/ayurvedic-pharmacopoeia-of-india-part-2/base-vol4_2017_en.pdf",
+        "version": "2017",
+        "language": "en",
+        "pdf_hash": "242908a3f26e7bf665e9509afba58ad9bb201b20c327e137a7059ecc1bacf371",
+        "ingested_date": "2026-09-02"
+    },
+    "0e18a40ded7c9d0f6ccfad2545c5e3685c1aa5df9a53850279a984d6e306c78c": {
+        "act_name": "Biological Diversity Act",
+        "jurisdiction": "national",
+        "source_pdf_path": "Corpus/national/biological-diversity-act/consolidated_2003_02_en.pdf",
+        "version": "2003_02",
+        "language": "en",
+        "pdf_hash": "729b07e581fe55319adcbf48fadb3b7d30293033a9a1550e70fc6adfb4ecb45f",
+        "ingested_date": "2026-09-02"
+    },
+    "fe404ce3ea568e7583556e4341f88110a5486fef8601ecce3dfd9b43e94a50c0": {
+        "act_name": "Copyright Act 1957",
+        "jurisdiction": "national",
+        "source_pdf_path": "Corpus/national/copyright-act-1957/consolidated_2026_06_en.pdf",
+        "version": "2026_06",
+        "language": "en",
+        "pdf_hash": "fc1e8ab7dee763fcda531eedc44de835c8e2bc4b9aaaf8cf29730e45b4289523",
+        "ingested_date": "2026-09-02"
+    },
+    "daefeb4f4f03fcaad794af4e0b714c1c053908b7e944c134e9c22992d5ee7b7f": {
+        "act_name": "Design Act",
+        "jurisdiction": "national",
+        "source_pdf_path": "Corpus/national/design-act/consolidated_2026_06_en.pdf",
+        "version": "2026_06",
+        "language": "en",
+        "pdf_hash": "25d76416d93f1c4b510189f8857941a8228437f7494382b228fdbd74e9e87be5",
+        "ingested_date": "2026-09-02"
+    },
+    "eb351745d821b48970f3110e19adb5d49102318b4c270a8943e17be87baab112": {
+        "act_name": "Drugs And Cosmetics Act 1940",
+        "jurisdiction": "national",
+        "source_pdf_path": "Corpus/national/drugs-and-cosmetics-act-1940/consolidated_2026_07_en.pdf",
+        "version": "2026_07",
+        "language": "en",
+        "pdf_hash": "f3e9a9b7c9d5060fad5d44f2b984bb9332ab8a6692368f99df0e3d9cc7e93f64",
+        "ingested_date": "2026-09-02"
+    },
+    "c9a40920e290a275d378ef89beabef6ddace979938a18dc7510235c7a6c4533b": {
+        "act_name": "Drugs And Magic Remedies Act 1954",
+        "jurisdiction": "national",
+        "source_pdf_path": "Corpus/national/drugs-and-magic-remedies-act-1954/consolidated_2026_04_en.pdf",
+        "version": "2026_04",
+        "language": "en",
+        "pdf_hash": "9dd51c69a283ade12f47e84e33454f5cedfd27e197c9554de785eb55627ab74f",
+        "ingested_date": "2026-09-02"
+    },
+    "f0b277037152179ef17b24d7656752c13802c9e356caadbadd4b8f6cd2dbf191": {
+        "act_name": "Food Safety And Standards Act",
+        "jurisdiction": "national",
+        "source_pdf_path": "Corpus/national/food-safety-and-standards-act/base_2006_08_en.pdf",
+        "version": "2006_08",
+        "language": "en",
+        "pdf_hash": "3fb792191b18a519f6f9b88d4e81d51e592104d9d858d66bfa3a91443d533db9",
+        "ingested_date": "2026-09-02"
+    },
+    "afcf73fc453fc5b3b9da79b8a64bb6515309aae8fcbf725a10cdd7a72a19b55c": {
+        "act_name": "Geographical Indications Of Goods Act 1999",
+        "jurisdiction": "national",
+        "source_pdf_path": "Corpus/national/geographical-indications-of-goods-act-1999/consolidated_2026_06_en.pdf",
+        "version": "2026_06",
+        "language": "en",
+        "pdf_hash": "f627842df535a20bb531fea8bb228f59f04e36fe664bf1b2a36ca688331bccc5",
+        "ingested_date": "2026-09-02"
+    },
+    "7c41a87496bcf9f0e3bde0ba5b3ec81d520fa37dd3aaf2c9285a47c0147cac3d": {
+        "act_name": "Jan Vishwas Act 2023",
+        "jurisdiction": "national",
+        "source_pdf_path": "Corpus/national/jan-vishwas-act-2023/amendment_2023_en.pdf",
+        "version": "2023",
+        "language": "en",
+        "pdf_hash": "c728e2f2de608e69e707a36876e823db447656406dafd2c19b2455a528d0b2eb",
+        "ingested_date": "2026-09-02"
+    },
+    "2ee5c8d6ab5009543372174cb55f67a606097b6af904df59b4780cbd5649a9bd": {
+        "act_name": "Jan Vishwas Act 2023",
+        "jurisdiction": "national",
+        "source_pdf_path": "Corpus/national/jan-vishwas-act-2023/amendment_2023_v0_en.pdf",
+        "version": "2023_v0",
+        "language": "en",
+        "pdf_hash": "23cb77f3b4905932d5ca94179eac97e48e27b01b2a1b70a7e57d3900b0ed1222",
+        "ingested_date": "2026-09-02"
+    },
+    "89c7d0cab1df6532e17f94a006b992f318c006026576b937e8324715f6966d03": {
+        "act_name": "Budapest Treaty",
+        "jurisdiction": "international",
+        "source_pdf_path": "Corpus/international/budapest-treaty/base_1977_en.pdf",
+        "version": "1977",
+        "language": "en",
+        "pdf_hash": "aefecadb3b9f6330bc1b430d79f58a2e58b84a9e25dcc17ebbb37123490d7b05",
+        "ingested_date": "2026-09-03"
+    },
+    "123542ae2a2bbb60a5741051b57725f62d1dd63165ae75da48cd58cc007f9094": {
+        "act_name": "Convention Of Biological Diversity 1992",
+        "jurisdiction": "international",
+        "source_pdf_path": "Corpus/international/convention-of-biological-diversity-1992/base_1992_en.pdf",
+        "version": "1992",
+        "language": "en",
+        "pdf_hash": "9acd3886bfb0b3c3a4d75b254b53dd4ab084d7ad59915f09f03bbe92cdc75517",
+        "ingested_date": "2026-09-03"
+    },
+    "7249c99d2432ee995562fbccf7c784e4b14ad079a127395f3eba1cad06a2c3ab": {
+        "act_name": "Geneva Act 1999",
+        "jurisdiction": "international",
+        "source_pdf_path": "Corpus/international/geneva-act-1999/base_1999_07_en.pdf",
+        "version": "1999_07",
+        "language": "en",
+        "pdf_hash": "bd3f3f15af991b9e61b7a0790838497f3049f3fa4996ad348941da0409575c16",
+        "ingested_date": "2026-09-03"
+    },
+    "db1a0e3cc0051175726ee9e44c854e373407a8d52fd4450a785f2d6c302b5f34": {
+        "act_name": "Madrid Agreement Protocol",
+        "jurisdiction": "international",
+        "source_pdf_path": "Corpus/international/madrid-agreement-protocol/base_1989_en.pdf",
+        "version": "1989",
+        "language": "en",
+        "pdf_hash": "a78966dbaaf9c632ecf96495ce4952c72b7986b558ed10c39d65a94cc06f8db8",
+        "ingested_date": "2026-09-03"
+    },
+    "6208b9c740ffb62e21ba7616ecd8c9ea76eaa0bb5937ffd396af75b961248763": {
+        "act_name": "Nagoya Protocol On Access And Benefit Sharing",
+        "jurisdiction": "international",
+        "source_pdf_path": "Corpus/international/nagoya-protocol-on-access-and-benefit-sharing/base_2010_en.pdf",
+        "version": "2010",
+        "language": "en",
+        "pdf_hash": "cdbd496bd361317d3b7237124177974bebac4cc800cf1974896bc19234cce856",
+        "ingested_date": "2026-09-03"
+    },
+    "d2e814e9f4f051d7e1fad2fc51ce118b61c03ea01214dcd9c775c261d617e627": {
+        "act_name": "Patent Cooperation Treaty 1970",
+        "jurisdiction": "international",
+        "source_pdf_path": "Corpus/international/patent-cooperation-treaty-1970/base_1970_en.pdf",
+        "version": "1970",
+        "language": "en",
+        "pdf_hash": "84677b5036f4d23eaad8a0da50274d297d479292f111a5304a4390b4b00c17ef",
+        "ingested_date": "2026-09-03"
+    },
+    "b7bc276595f68c0baffc0e8fb55d4ed8e1887f064532be12079c1e3d2cf27937": {
+        "act_name": "Wipo Treaty On Intellectual Property",
+        "jurisdiction": "international",
+        "source_pdf_path": "Corpus/international/wipo-treaty-on-intellectual-property/base_2024_en.pdf",
+        "version": "2024",
+        "language": "en",
+        "pdf_hash": "2f2b4f11cd98276de5dff0967b5d1ce924fbcd0909f73e6cc9bb54d93cdbc4bd",
+        "ingested_date": "2026-09-03"
+    },
+    "6fe5de841b97b6d019290bd2c9e4feaae4606bdcd8460173b781186ed39f071c": {
+        "act_name": "Patents Act 1970",
+        "jurisdiction": "national",
+        "source_pdf_path": "Corpus/national/patents-act-1970/amendment_1999_en.pdf",
+        "version": "1999",
+        "language": "en",
+        "pdf_hash": "0f695279f51c088eb299904a6acc29c8c6f931f5fc436556a3fedb0801b578e3",
+        "ingested_date": "2026-09-03"
+    },
+    "f841081bd18a670c41bf5bb1eef58a66b028aa5fa4601d836a5d50f351eb6e83": {
+        "act_name": "Patents Act 1970",
+        "jurisdiction": "national",
+        "source_pdf_path": "Corpus/national/patents-act-1970/amendment_2002_06_en.pdf",
+        "version": "2002_06",
+        "language": "en",
+        "pdf_hash": "6b2afe2aafce7bf2b18a96ea52f2e28849f2cf07dd7cb4af10bfe48609c9b14e",
+        "ingested_date": "2026-09-03"
+    },
+    "21407147d13d3fe5f01e291afb8b95a1a7ea9fbf5a9a6888497d03476f2ba5ed": {
+        "act_name": "Patents Act 1970",
+        "jurisdiction": "national",
+        "source_pdf_path": "Corpus/national/patents-act-1970/amendment_2002_en.pdf",
+        "version": "2002",
+        "language": "en",
+        "pdf_hash": "6b2afe2aafce7bf2b18a96ea52f2e28849f2cf07dd7cb4af10bfe48609c9b14e",
+        "ingested_date": "2026-09-03"
+    },
+    "f3f8a92e1887290a3c441adf2962d476a5f216d7dbdc993e89a51c72e5bb3294": {
+        "act_name": "Patents Act 1970",
+        "jurisdiction": "national",
+        "source_pdf_path": "Corpus/national/patents-act-1970/amendment_2005_en.pdf",
+        "version": "2005",
+        "language": "en",
+        "pdf_hash": "886f40bbaffa36f6cbf8ac51c0716e4ae9f88a19d9e910d4f8928488647079dd",
+        "ingested_date": "2026-09-03"
+    },
+    "b199f6b6c626486c658102fdccad478b0d01045c7240695f512928eba7e95c9d": {
+        "act_name": "Patents Act 1970",
+        "jurisdiction": "national",
+        "source_pdf_path": "Corpus/national/patents-act-1970/base_1970_en.pdf",
+        "version": "1970",
+        "language": "en",
+        "pdf_hash": "943f2afea493474af3fe3cf8b9ce7f456757616ee57083d6ce32a02c3a33914e",
+        "ingested_date": "2026-09-03"
+    },
+    "a4a9798b0835daffa510d10154a3ecfd7d158f0539030a9b42de55566944937f": {
+        "act_name": "Patents Act 1970",
+        "jurisdiction": "national",
+        "source_pdf_path": "Corpus/national/patents-act-1970/base_1970_hi.pdf",
+        "version": "1970",
+        "language": "hi",
+        "pdf_hash": "9b9da497989f82bac4ad053bc913027cd4c0db56d6b389e211fbe79c2472f9d3",
+        "ingested_date": "2026-09-03"
+    },
+    "20754b653f424e388637ac077f5523ce667c9da51447697953e96863cd22e459": {
+        "act_name": "Patents Act 1970",
+        "jurisdiction": "national",
+        "source_pdf_path": "Corpus/national/patents-act-1970/consolidated_2015_en.pdf",
+        "version": "2015",
+        "language": "en",
+        "pdf_hash": "5cf3c6a0802f462d43969415d5129c1e3aa7eb73144668d1d0fb95efcb809846",
+        "ingested_date": "2026-09-03"
+    },
+    "5feb9a7b11e4e219c4e0b0f31f17e5d85cdf1a80bb92957a5a3707177d251b20": {
+        "act_name": "Patents Act 1970",
+        "jurisdiction": "national",
+        "source_pdf_path": "Corpus/national/patents-act-1970/consolidated_2024_en.pdf",
+        "version": "2024",
+        "language": "en",
+        "pdf_hash": "d57084888c69d70b16ed6a52a612363a526994203effa58880a26faaaa6e0678",
+        "ingested_date": "2026-09-03"
+    },
+    "b68cc04667488daba3b227c5e1011918cfa891c709f8d16148ddb67350f9d3ba": {
+        "act_name": "Patents Act 1970",
+        "jurisdiction": "national",
+        "source_pdf_path": "Corpus/national/patents-act-1970/consolidated_2026_05_en.pdf",
+        "version": "2026_05",
+        "language": "en",
+        "pdf_hash": "583f2461d79572692d9046e5ac13bb7cff82eedb7863c565da02d9a0893cb8f6",
+        "ingested_date": "2026-09-03"
+    },
+    "29900000b18779b95b1b8b598c0ac4f0b50ebbaf8732e4f900e90b0a03371523": {
+        "act_name": "Protection Of Plant Varieties And Farmers Rights Act",
+        "jurisdiction": "national",
+        "source_pdf_path": "Corpus/national/protection-of-plant-varieties-and-farmers-rights-act/base_2001_10_en.pdf",
+        "version": "2001_10",
+        "language": "en",
+        "pdf_hash": "37e100975868c3ae9ae61cbd89b1964156faa514df2115e36ad4564e0811d765",
+        "ingested_date": "2026-09-03"
+    },
+    "09056f594cea7546bebe5c51b9f0801bcbccb4f3a575649ba1520e7ad1424ac9": {
+        "act_name": "Trade Marks Act 1999",
+        "jurisdiction": "national",
+        "source_pdf_path": "Corpus/national/trade-marks-act-1999/consolidated_2026_06_en.pdf",
+        "version": "2026_06",
+        "language": "en",
+        "pdf_hash": "3ee682af4ec4701a00aa27842e0add2321a6aed75808aa1c5ca33591e85d4986",
+        "ingested_date": "2026-09-03"
+    },
+    "0b596551df13e09d5a6244f3a47fbabdbebd995824c5764171f2cf1bafd0da76": {
+        "act_name": "Tribunals Reforms Act 2021",
+        "jurisdiction": "national",
+        "source_pdf_path": "Corpus/national/tribunals-reforms-act-2021/base_2021_en.pdf",
+        "version": "2021",
+        "language": "en",
+        "pdf_hash": "f8c455b107ba3e6d945da44c3f793f331acb44360128312c00ead4c67fba8d5e",
+        "ingested_date": "2026-09-03"
+    }
+}
