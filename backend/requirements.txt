@@ -3,6 +3,7 @@
 # API framework
 fastapi>=0.100.0
 uvicorn>=0.23.0
+slowapi>=0.1.9
 
 # LangChain ecosystem
 langchain>=0.2.0
@@ -10,6 +11,7 @@ langchain-core>=0.2.0
 langchain-community>=0.2.0
 langchain-chroma>=0.1.0
 langchain-groq>=0.1.0
+langchain-openai>=0.1.0
 
 # LangGraph — orchestration
 # NOTE: requires >=0.2.0 for StateGraph, add_conditional_edges, and END sentinel
@@ -29,6 +31,10 @@ pydantic>=2.0.0
 
 # Utilities
 python-dotenv>=1.0.0
+tenacity>=8.0.0
+
+# Search
+duckduckgo-search>=5.0.0
 
 # Legacy — kept for backward compatibility if any other code references it
 langchain-openrouter>=0.0.1

@@ -1,0 +1,115 @@
+[
+    {
+        "id": "L1",
+        "query": "What does Section 3 of the Patents Act say?",
+        "mode": "national",
+        "expected_behavior": "Answers directly via retrieve-and-generate. Must not trigger classify_formulation.",
+        "tier": "fast",
+        "_note": "I1/I2 deterministic tests are in deterministic_checks.py"
+    },
+    {
+        "id": "L2",
+        "query": "What is the Patent Cooperation Treaty?",
+        "mode": "international",
+        "expected_behavior": "Direct answer, international_ip domain, no classification loop.",
+        "tier": "periodic"
+    },
+    {
+        "id": "C1",
+        "query": "We make a hair oil for external use only, no therapeutic claims.",
+        "mode": "national",
+        "expected_behavior": "Resolves to cosmetic in one pass, no clarifying questions.",
+        "tier": "periodic"
+    },
+    {
+        "id": "C2",
+        "query": "This is a Chyawanprash made exactly per the Bhaishajya Ratnavali formula, no changes.",
+        "mode": "national",
+        "expected_behavior": "Resolves to classical, Q3 shows retrieval-backed comparison.",
+        "tier": "needs_confirmation"
+    },
+    {
+        "id": "A1",
+        "query": "Our formulation consists of Ashwagandha (Withania somnifera), black pepper, and ginger. It is designed to boost immunity and energy.",
+        "mode": "national",
+        "expected_behavior": "Does not silently resolve to ayurveda_aahar. Q2/Q4 come back unknown and trigger clarify.",
+        "tier": "needs_confirmation"
+    },
+    {
+        "id": "A2",
+        "query": "Our product enhances bioavailability of a known compound by 40%, verified in vitro.",
+        "mode": "national",
+        "expected_behavior": "Triggers clarify with a pending clarification question due to unknown formulation.",
+        "tier": "needs_confirmation"
+    },
+    {
+        "id": "M1",
+        "query": "What NBA approvals do we need before filing a patent on this formulation?",
+        "mode": "national",
+        "expected_behavior": "Answers both without needing explicit literal domain tags in the output.",
+        "tier": "needs_confirmation"
+    },
+    {
+        "id": "M2",
+        "query": "We are developing a new formulation containing Ashwagandha. We want to know if it classifies as an Ayurvedic medicine or cosmetic, what NBA approvals we need, and how to protect the IP internationally.",
+        "mode": "both",
+        "expected_behavior": "All sub-questions produce an executed task.",
+        "tier": "fast"
+    },
+    {
+        "id": "J1",
+        "query": "We make a hair oil for external use only, no therapeutic claims.",
+        "mode": null,
+        "expected_behavior": "Request rejected with 400 error.",
+        "tier": "needs_confirmation"
+    },
+    {
+        "id": "J2",
+        "query": "We make a hair oil for external use only, no therapeutic claims.",
+        "mode": "both",
+        "expected_behavior": "Two separate generation calls fire, distinct national/international answer fields.",
+        "tier": "needs_confirmation"
+    },
+    {
+        "id": "O1",
+        "query": "What's the trademark registration process for this product in Japan?",
+        "mode": "international",
+        "expected_behavior": "Explicit abstain with stated reason.",
+        "tier": "needs_confirmation"
+    },
+    {
+        "id": "T1",
+        "query": "Is TKDL relevant for protecting our formulation?",
+        "mode": "national",
+        "expected_behavior": "Templated, category-aware answer grounded in TKDL and Biological Diversity Act.",
+        "tier": "needs_confirmation"
+    },
+    {
+        "id": "H1",
+        "query": "पेटेंट अधिनियम की धारा 3 क्या कहती है?",
+        "mode": "national",
+        "expected_behavior": "Resolves to Patents Act Section 3 (Hindi version of L1).",
+        "tier": "fast"
+    },
+    {
+        "id": "H2",
+        "query": "हम केवल बाहरी उपयोग के लिए एक हेयर ऑयल बनाते हैं, कोई चिकित्सीय दावा नहीं करते हैं।",
+        "mode": "national",
+        "expected_behavior": "Same formulation category (cosmetic) as C1.",
+        "tier": "needs_confirmation"
+    },
+    {
+        "id": "I1",
+        "query": "Substitute Section 39 of the Patents Act.",
+        "mode": "national",
+        "expected_behavior": "Retrieves amendment act and correctly reflects target section 39.",
+        "tier": "needs_confirmation"
+    },
+    {
+        "id": "I2",
+        "query": "What does the Biological Diversity Act say about equitable benefit sharing?",
+        "mode": "national",
+        "expected_behavior": "Evidence contains no duplicate chunk content.",
+        "tier": "needs_confirmation"
+    }
+]

@@ -47,12 +47,14 @@ REGISTRY_PATH = os.path.abspath(
 
 EMBEDDING_MODEL: str = os.getenv("EMBEDDING_MODEL", "intfloat/multilingual-e5-large")
 
-# Abstention thresholds — tune empirically with the evaluation set
-SIMILARITY_THRESHOLD: float = float(os.getenv("SIMILARITY_THRESHOLD", "0.45"))
-MIN_RELEVANT_CHUNKS: int = int(os.getenv("MIN_RELEVANT_CHUNKS", "3"))
+# Abstention thresholds — tune empirically with the evaluation set.
+# Lowered from 0.45 → 0.35 and 3 → 1 after observing real evaluation scores
+# (max_similarity was 0.4084 on a working query, so 0.45 was too strict).
+SIMILARITY_THRESHOLD: float = float(os.getenv("SIMILARITY_THRESHOLD", "0.35"))
+MIN_RELEVANT_CHUNKS: int = int(os.getenv("MIN_RELEVANT_CHUNKS", "1"))
 
 # Top-k chunks to retrieve per jurisdiction per query
-DEFAULT_K: int = int(os.getenv("RETRIEVAL_K", "15"))
+DEFAULT_K: int = int(os.getenv("RETRIEVAL_K", "8"))
 
 
 # ── Lazy-initialised Chroma handles ───────────────────────────────────────────
@@ -90,6 +92,7 @@ def retrieve(
     query: str,
     jurisdiction: str,                     # "national" | "international"
     formulation_category: Optional[str] = None,
+    domains: Optional[list[str]] = None,
     k: int = DEFAULT_K,
 ) -> list[dict]:
     """
@@ -101,13 +104,109 @@ def retrieve(
     The document_id field is the stable ingestion-time hash that maps
     to the registry entry — never expose source_pdf_path from here.
     """
+    if jurisdiction not in {"national", "international"}:
+        raise ValueError(f"Jurisdiction must be 'national' or 'international', got: {jurisdiction}")
+
     collection = (
         _get_national() if jurisdiction == "national" else _get_international()
     )
-    results = collection.similarity_search_with_relevance_scores(query, k=k)
+    
+    primary_acts = set()
+    boundary_acts = set()
+    
+    if jurisdiction == "national":
+        IP_ACTS = ["Patents Act 1970", "Trade Marks Act 1999", "Geographical Indications Of Goods Act 1999", "Design Act", "Copyright Act 1957", "Protection Of Plant Varieties And Farmers Rights Act"]
+        for d in (domains or []):
+            if d == "patent":
+                primary_acts.update(IP_ACTS)
+            elif d == "biodiversity":
+                primary_acts.update(["Biological Diversity Act"])
+            elif d == "regulatory" and formulation_category:
+                if formulation_category == "cosmetic":
+                    primary_acts.update(["Drugs And Cosmetics Act 1940", "Drugs And Magic Remedies Act 1954"])
+                    boundary_acts.update(["Food Safety And Standards Act"])
+                elif formulation_category == "ayurveda_aahar":
+                    primary_acts.update(["Food Safety And Standards Act"])
+                    boundary_acts.update(["Drugs And Cosmetics Act 1940", "Drugs And Magic Remedies Act 1954"])
+                elif formulation_category == "classical":
+                    primary_acts.update(["Drugs And Cosmetics Act 1940", "Ayurvedic Pharmacopoeia Of India Part 1", "Ayurvedic Pharmacopoeia Of India Part 2"])
+                    boundary_acts.update(["Food Safety And Standards Act"])
+                elif formulation_category == "phytopharmaceutical":
+                    primary_acts.update(["Drugs And Cosmetics Act 1940"])
+                    boundary_acts.update(["Ayurvedic Pharmacopoeia Of India Part 1", "Ayurvedic Pharmacopoeia Of India Part 2"])
+                elif formulation_category == "proprietary":
+                    primary_acts.update(["Drugs And Cosmetics Act 1940", "Drugs And Magic Remedies Act 1954"])
+                    boundary_acts.update(["Ayurvedic Pharmacopoeia Of India Part 1", "Ayurvedic Pharmacopoeia Of India Part 2"])
+                elif formulation_category == "new_drug":
+                    primary_acts.update(["Drugs And Cosmetics Act 1940"])
+                    boundary_acts.update(["Food Safety And Standards Act"])
+    else:
+        for d in (domains or []):
+            if d == "international_ip" or d == "patent":
+                # TODO: Add "TRIPS Agreement" when it gets ingested into ChromaDB.
+                # TODO: "Wipo Treaty On Intellectual Property" is an ambiguous act name in the corpus, 
+                #       likely referring to GRATK. If renamed during ingestion, update this mapping.
+                primary_acts.update(["Patent Cooperation Treaty 1970", "Madrid Agreement Protocol", "Geneva Act 1999", "Wipo Treaty On Intellectual Property", "Budapest Treaty"])
+            elif d == "biodiversity":
+                primary_acts.update(["Convention Of Biological Diversity 1992", "Nagoya Protocol On Access And Benefit Sharing"])
+
+    # Issue 10: Dynamic intersection with registry.json
+    if os.path.exists(REGISTRY_PATH):
+        try:
+            with open(REGISTRY_PATH, "r", encoding="utf-8") as f:
+                registry = json.load(f)
+            active_acts = {entry.get("act_name") for entry in registry.values() if entry.get("act_name")}
+            if primary_acts:
+                primary_acts.intersection_update(active_acts)
+            if boundary_acts:
+                boundary_acts.intersection_update(active_acts)
+        except Exception:
+            pass # Fall back to hardcoded sets if registry is unavailable or malformed
+
+    results = []
+    # If no filtering can be applied (either originally empty, or zeroed out by registry check), do open retrieval
+    if not primary_acts and not boundary_acts:
+        results = collection.similarity_search_with_score(query, k=k)
+    else:
+        k_primary = min(k, int(k * 0.8)) # e.g. 12 if k=15
+        k_boundary = k - k_primary
+        
+        if primary_acts:
+            results.extend(collection.similarity_search_with_score(query, k=k_primary, filter={"act_name": {"$in": list(primary_acts)}}))
+            
+        if boundary_acts and k_boundary > 0:
+            results.extend(collection.similarity_search_with_score(query, k=k_boundary, filter={"act_name": {"$in": list(boundary_acts)}}))
+
+    # Deduplicate by chunk_id and content
+    seen_ids = set()
+    seen_texts = set()
+    unique_results = []
+    # Sort results by distance (score is distance in Chroma results initially)
+    results.sort(key=lambda x: x[1])
+    
+    for doc, distance in results:
+        chunk_id = doc.metadata.get("chunk_id", "")
+        content = doc.page_content.strip()
+        
+        if chunk_id in seen_ids or content in seen_texts:
+            continue
+            
+        seen_ids.add(chunk_id)
+        seen_texts.add(content)
+        unique_results.append((doc, distance))
+
+    # Slice to top K overall unique
+    unique_results = unique_results[:k]
 
     chunks: list[dict] = []
-    for doc, score in results:
+    for doc, distance in unique_results:
+        DISTANCE_METRIC: str = os.getenv("DISTANCE_METRIC", "l2")
+        if DISTANCE_METRIC == "cosine":
+            similarity = max(0.0, 1.0 - float(distance) / 2.0)
+        else:
+            L2_SCALE: float = float(os.getenv("L2_DISTANCE_SCALE", "400.0"))
+            similarity = max(0.0, 1.0 - float(distance) / L2_SCALE)
+
         chunks.append({
             "chunk_id": doc.metadata.get("chunk_id", ""),
             "document_id": doc.metadata.get("document_id", ""),
@@ -123,7 +222,7 @@ def retrieve(
                 "language": doc.metadata.get("language", "en"),
                 "last_verified_date": doc.metadata.get("last_verified_date", ""),
             },
-            "similarity": round(float(score), 4),
+            "similarity": round(similarity, 4),
         })
 
     return chunks
@@ -131,7 +230,7 @@ def retrieve(
 
 # ── Abstention logic ───────────────────────────────────────────────────────────
 
-def is_sufficient_coverage(chunks: list[dict]) -> tuple[bool, str]:
+def is_sufficient_coverage(chunks: list[dict], task_question: str = "") -> tuple[bool, str]:
     """
     Evaluate whether retrieval coverage is sufficient to generate a safe answer.
 
@@ -166,6 +265,19 @@ def is_sufficient_coverage(chunks: list[dict]) -> tuple[bool, str]:
             f"({SIMILARITY_THRESHOLD}); need at least {MIN_RELEVANT_CHUNKS} for a "
             "grounded answer. The corpus coverage for this specific question is thin."
         )
+
+    # Task-specific sufficiency (e.g., if task requires case law)
+    if "case law" in task_question.lower() or "cases" in task_question.lower() or "judgment" in task_question.lower():
+        # Iterate over the actual chunk dictionaries that met the relevance threshold
+        relevant_chunks = [c for c in chunks if c["similarity"] >= SIMILARITY_THRESHOLD]
+        has_case_law = any(
+            "case" in c.get("metadata", {}).get("source_type", "").lower() or 
+            "judgment" in c.get("metadata", {}).get("source_type", "").lower() or
+            "case" in c.get("metadata", {}).get("act_name", "").lower()
+            for c in relevant_chunks
+        )
+        if not has_case_law:
+            return False, "Task requires case law, but no case law was found in the retrieved evidence."
 
     return True, ""
 

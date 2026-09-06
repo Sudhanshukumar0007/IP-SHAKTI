@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import os
 import time
-from typing import Optional, Any
+from typing import Optional, Any, Literal
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -39,9 +39,10 @@ from slowapi.errors import RateLimitExceeded
 
 load_dotenv()
 
+from config import settings
 from graph.graph import graph as langgraph_app
 from services import session_store, query_log
-from services.retriever import lookup_document, lookup_by_act_name
+from services.retriever import lookup_document, lookup_by_act_name, SIMILARITY_THRESHOLD
 
 # ── Startup ────────────────────────────────────────────────────────────────────
 
@@ -62,7 +63,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -78,7 +79,7 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 # ── Request / response models ──────────────────────────────────────────────────
 
 class CreateSessionRequest(BaseModel):
-    jurisdiction_mode: str = "national"   # "national" | "international" | "both"
+    jurisdiction_mode: Literal["national", "international", "both"]
     language: str = "en"
 
 
@@ -91,7 +92,8 @@ class CreateSessionResponse(BaseModel):
 class ChatRequest(BaseModel):
     session_id: str
     message: str                          # new query OR "yes"/"no" clarification answer
-    jurisdiction_mode: Optional[str] = None  # if provided, updates the session
+    jurisdiction_mode: Optional[Literal["national", "international", "both"]] = None  # if provided, updates the session
+    language: Optional[str] = None
 
 
 class ClarificationResponse(BaseModel):
@@ -102,6 +104,7 @@ class ClarificationResponse(BaseModel):
 
 
 class CitationModel(BaseModel):
+    index: int = 1
     document_id: str
     act_name: str
     section_or_article: str
@@ -110,11 +113,12 @@ class CitationModel(BaseModel):
     chunk_id: str
     version: str
     jurisdiction: str
+    snippet: Optional[str] = ""
 
 
 class AnswerResponse(BaseModel):
     type: str = "answer"
-    jurisdiction_mode: str
+    jurisdiction_mode: Literal["national", "international", "both"] = "both"
     formulation_category: str
     national_answer: Optional[dict] = None
     international_answer: Optional[dict] = None
@@ -124,6 +128,7 @@ class AnswerResponse(BaseModel):
     abstain_reason: Optional[str] = None
     execution_trace: list[str] = []
     live_evidence: list[dict] = []
+    overall_status: str = "UNKNOWN"
 
 
 
@@ -222,9 +227,14 @@ def chat(request: Request, req: ChatRequest):
     if state is None:
         raise HTTPException(status_code=404, detail="Session not found. Call POST /session first.")
 
-    # Optionally update jurisdiction_mode if the frontend sends a new one
+    # Always apply jurisdiction_mode and language update first - before routing to clarification
+    # or new-query branch. Without this, replying "yes"/"no" to a clarification
+    # gate ignores the mode sent by the frontend and uses stale session state.
     if req.jurisdiction_mode and req.jurisdiction_mode in ("national", "international", "both"):
         state["jurisdiction_mode"] = req.jurisdiction_mode
+        
+    if req.language:
+        state["language"] = req.language
 
     if _is_clarification_answer(req.message, state):
         # Append gate answer + record in clarification_history
@@ -248,7 +258,15 @@ def chat(request: Request, req: ChatRequest):
     session_store.update_session(req.session_id, state)
 
     # Run the LangGraph pipeline
-    result_state: dict = langgraph_app.invoke(state)
+    try:
+        result_state: dict = langgraph_app.invoke(state)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        err_msg = str(e)
+        if "429" in err_msg or "rate limit" in err_msg.lower() or "too many requests" in err_msg.lower():
+            raise HTTPException(status_code=503, detail="LLM provider rate-limited. High demand, please try again shortly.")
+        raise HTTPException(status_code=500, detail=f"Internal Server Error: {err_msg}")
 
     # Persist final state back to the session store
     session_store.update_session(req.session_id, result_state)
@@ -287,6 +305,7 @@ def chat(request: Request, req: ChatRequest):
             abstained=True,
             abstain_reason=result_state.get("abstain_reason"),
             execution_trace=result_state.get("execution_trace", []),
+            overall_status=result_state.get("overall_status", "ABSTAIN"),
         )
 
     # Case 3: fully generated answer
@@ -301,6 +320,7 @@ def chat(request: Request, req: ChatRequest):
         abstained=False,
         execution_trace=result_state.get("execution_trace", []),
         live_evidence=result_state.get("live_evidence", []),
+        overall_status=result_state.get("overall_status", "UNKNOWN"),
     )
 
 
@@ -346,7 +366,7 @@ def verify_act(
 
 
 @app.get("/pdf/{document_id}")
-def serve_pdf(document_id: str) -> FileResponse:
+def serve_pdf(document_id: str) -> Response:
     """
     Serve the original PDF for a given document_id.
 
@@ -373,11 +393,196 @@ def serve_pdf(document_id: str) -> FileResponse:
     if not abs_path.startswith(CORPUS_ROOT):
         raise HTTPException(status_code=403, detail="Access denied.")
 
+    from fastapi.responses import FileResponse
     return FileResponse(
         path=abs_path,
         media_type="application/pdf",
-        filename=os.path.basename(abs_path),
+        content_disposition_type="inline",
+        filename=f"{document_id}.pdf"
     )
+
+
+@app.get("/api/eval/graph")
+def get_eval_graph():
+    try:
+        from graph.graph import graph
+        mermaid_syntax = graph.get_graph().draw_mermaid()
+        return {"graph": mermaid_syntax}
+    except Exception as e:
+        return {"graph": "", "error": str(e)}
+
+
+@app.get("/api/eval/metrics/{session_id}")
+def get_session_eval_metrics(session_id: str):
+    import sqlite3
+    db_path = "query_log.db"
+    if not os.path.exists(db_path) and not session_store.get_session(session_id):
+        return {"total_queries": 0, "abstention_rate": 0, "avg_confidence": 0, "categories": [], "abstention_reasons": [], "chunks": [], "execution_trace": [], "confidence_components": {}}
+    
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    c = conn.cursor()
+    c.execute("SELECT * FROM query_log WHERE session_id = ?", (session_id,))
+    rows = c.fetchall()
+    conn.close()
+
+    if not rows and not session_store.get_session(session_id):
+        return {
+            "total_queries": 0, "abstention_rate": 0, "avg_confidence": 0,
+            "categories": [], "abstention_reasons": [], "chunks": [],
+            "execution_trace": [], "confidence_components": {}
+        }
+
+    total = len(rows)
+    abstained = sum(1 for r in rows if r["abstain"])
+    confidences = [r["confidence_score"] for r in rows if r["confidence_score"] is not None]
+    avg_conf = round(sum(confidences) / len(confidences), 2) if confidences else 0
+
+    cats = {}
+    reasons = {}
+    for r in rows:
+        cat = r["formulation_category"] or "Unknown"
+        cats[cat] = cats.get(cat, 0) + 1
+        if r["abstain"]:
+            reason = r["abstain_reason"] or "Unknown"
+            reasons[reason] = reasons.get(reason, 0) + 1
+
+    categories_list = [{"name": k, "count": v} for k,v in cats.items()]
+    reasons_list = [{"name": k, "count": v} for k,v in reasons.items()]
+
+    trace = []
+    task_results = []
+    overall_status = "UNAVAILABLE"
+    abstain = False
+    abstain_reason = None
+    avg_conf = None
+    node_details = {}
+    
+    state = session_store.get_session(session_id)
+    if state:
+        trace = state.get("execution_trace") or []
+        task_results = state.get("task_results") or []
+        overall_status = state.get("overall_status") or "UNAVAILABLE"
+        abstain = state.get("abstain", False)
+        abstain_reason = state.get("abstain_reason") or None
+        
+        overall_status_normalized = "ABSTAINED" if overall_status == "ABSTAIN" else overall_status
+        
+        # Check if query actually completed. If it crashed or is incomplete, confidence is UNAVAILABLE
+        # We assume if overall_status is set, or if it hit log_and_serve (which sets abstain), it's a genuine run
+        if state.get("overall_status") is not None or abstain or total > 0:
+            avg_conf = state.get("confidence_score")
+        
+        # Build node records (duration_ms is null for now as it's not tracked natively)
+        node_details = {
+            "detect_intent": { "status": "PASSED" if state.get("jurisdiction_mode") else "PENDING" },
+            "auto_classify": { "status": "PASSED" if state.get("formulation_category") else "PENDING" },
+            "classify_formulation": { "status": "PASSED" if state.get("formulation_category") else "PENDING" },
+            "supervisor": {
+                "status": "PASSED" if task_results else ("PENDING" if not abstain else "SKIPPED"),
+                "details": {"tasks_created": len(task_results)}
+            },
+            "worker": {
+                "status": overall_status_normalized if overall_status_normalized in ("VERIFIED", "PARTIAL") else ("FAILED" if task_results else "PENDING"),
+                "details": {
+                    "tasks_executed": len(task_results),
+                    "tasks_sufficient": sum(1 for t in task_results if t.get("sufficient", False))
+                }
+            },
+            "evidence_verification": {
+                "status": "PASSED" if overall_status_normalized == "VERIFIED" else ("PARTIAL" if overall_status_normalized == "PARTIAL" else "FAILED")
+            },
+            "live_registry_search": {
+                "status": "SKIPPED"
+            },
+            "generate": {
+                "status": "PASSED" if overall_status_normalized in ("VERIFIED", "PARTIAL") else "SKIPPED"
+            },
+            "score_confidence": {
+                "status": "PASSED" if overall_status_normalized in ("VERIFIED", "PARTIAL") else "SKIPPED"
+            },
+            "log_and_serve": {
+                "status": "PASSED" if state.get("start_time") else "PENDING"
+            }
+        }
+
+    # Format Tasks
+    formatted_tasks = []
+    for t in task_results:
+        raw_chunks = t.get("retrieved_chunks", [])
+        
+        # Sort chunks by similarity descending (highest match first)
+        sorted_chunks = sorted(raw_chunks, key=lambda x: x.get("similarity", 0.0), reverse=True)
+        
+        trimmed_chunks = []
+        for c in sorted_chunks:
+            text = c.get("content", "")
+            if len(text) > 200:
+                # Word-boundary truncation
+                text = text[:197].rsplit(' ', 1)[0] + "..."
+                
+            sim = c.get("similarity", 0.0)
+            
+            trimmed_chunks.append({
+                "chunk_id": c.get("chunk_id", ""),
+                "act_name": c.get("metadata", {}).get("act_name", "Unknown Source"),
+                "section_or_article": c.get("metadata", {}).get("section_or_article", ""),
+                "page_start": c.get("metadata", {}).get("page_start", 1),
+                "similarity": sim,
+                "is_relevant": sim >= SIMILARITY_THRESHOLD,
+                "snippet": text
+            })
+
+        formatted_tasks.append({
+            "task_id": t.get("task_id", t.get("id", "Unknown")),
+            "question": t.get("question", ""),
+            "status": "PASSED" if t.get("sufficient") else "INSUFFICIENT",
+            "sufficient": t.get("sufficient", False),
+            "retrieved_count": len(raw_chunks),
+            "relevant_count": t.get("relevant_chunk_count", 0),
+            "max_similarity": t.get("max_similarity", 0.0),
+            "mean_similarity": t.get("mean_similarity", 0.0),
+            "reason": t.get("abstain_reason"),
+            "chunks": trimmed_chunks
+        })
+        
+    # Calculate Coverage & Retrieval Relevance
+    task_coverage = None
+    retrieval_relevance = None
+    if formatted_tasks:
+        sufficient = sum(1 for t in formatted_tasks if t["sufficient"])
+        task_coverage = round((sufficient / len(formatted_tasks)) * 100)
+        
+        max_sims = [t["max_similarity"] for t in formatted_tasks if t["max_similarity"] is not None]
+        if max_sims:
+            retrieval_relevance = round((sum(max_sims) / len(max_sims)) * 100)
+
+    # Note: avg_conf might be a float 0.0 - 1.0, convert to 0-100 heuristic
+    conf_heuristic = None
+    if avg_conf is not None:
+        conf_heuristic = round(avg_conf * 100) if avg_conf <= 1.0 else round(avg_conf)
+
+    return {
+        "session_id": session_id,
+        "outcome": {
+            "status": overall_status_normalized if state else "UNAVAILABLE",
+            "is_abstained": abstain
+        },
+        "scores": {
+            "confidence_heuristic": conf_heuristic,
+            "task_coverage": task_coverage,
+            "retrieval_relevance": retrieval_relevance,
+            "claim_grounding": None,
+            "citation_accuracy": None
+        },
+        "tasks": formatted_tasks,
+        "nodes": node_details,
+        "abstention": {
+            "status": "ABSTAINED" if abstain else "NOT_ABSTAINED",
+            "reason": abstain_reason
+        },
+        "trace": trace
+    }
 
 
 @app.get("/eval/summary")
@@ -387,6 +592,8 @@ def eval_summary() -> dict:
     abstention rate, average confidence, latency, per-jurisdiction/category/language counts.
     Not user-facing — for team evaluation and submission evidence.
     """
+    if not settings.ENABLE_DEV_TRACE:
+        raise HTTPException(status_code=403, detail="Evaluation summary is only available in dev mode.")
     return query_log.get_summary()
 
 

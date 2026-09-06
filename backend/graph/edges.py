@@ -7,7 +7,31 @@ They contain no side-effects and no LLM calls.
 
 from __future__ import annotations
 
+import re
 from graph.state import AgentState
+
+
+def after_intent(state: AgentState) -> str:
+    """
+    After detect_intent, route based on query_intent:
+
+    - "informational" → "supervisor"
+      Skip the five-gate classification Q&A entirely.
+      formulation_category is already set to "informational" so after_classify
+      will route onward correctly.
+
+    - "classification" | "unknown" (or anything else) → "auto_classify"
+      Proceed through the standard keyword-match → gate tree path.
+    """
+    intent = state.get("query_intent", "unknown")
+
+    # If detect_intent already resolved to informational, skip classification
+    if intent == "informational":
+        return "supervisor"
+
+    # For explicit classification requests AND ambiguous queries, run the
+    # keyword matcher first — it may shortcut the Q&A for obvious products.
+    return "auto_classify"
 
 
 def after_classify(state: AgentState) -> str:
@@ -18,9 +42,9 @@ def after_classify(state: AgentState) -> str:
        clarification_attempts >= MAX without resolution.
        → END this turn; main.py will return a failure response.
 
-    2. "retrieve"
+    2. "supervisor"
        formulation_category is a valid leaf enum.
-       → proceed to retrieve (jurisdiction routing handled inside retrieve node).
+       → proceed to supervisor to decompose the query into tasks.
 
     3. "__end__" (needs clarification)
        pending_clarification is set; formulation_category is None.
@@ -34,23 +58,36 @@ def after_classify(state: AgentState) -> str:
         return "classification_failed"
 
     if category is not None:
-        return "retrieve"
+        return "supervisor"
 
     # pending_clarification is set — end this turn, frontend asks the user
     return "__end__"
 
 
-
-import re
-
-def after_retrieve(state: AgentState) -> str:
+def after_worker(state: AgentState) -> str:
     """
-    After retrieve:
-      - Coverage insufficient (abstain=True) → skip generate & score, go to log_and_serve
-      - Coverage sufficient:
+    After a worker executes a task, loop back if more tasks remain,
+    otherwise proceed to evidence verification.
+    """
+    idx = state.get("worker_index", 0)
+    tasks = state.get("research_tasks", [])
+    
+    if idx < len(tasks):
+        return "worker"
+    return "evidence_verification"
+
+
+def after_verification(state: AgentState) -> str:
+    """
+    After evidence_verification:
+      - Overall status is ABSTAIN → skip generate & score, go to log_and_serve
+      - Coverage sufficient (VERIFIED or PARTIAL):
           - Query requires live factual data? → live_registry_search
           - Otherwise → generate
     """
+    if state.get("abstain"):
+        return "log_and_serve"
+        
     query = state.get("raw_query", "").lower()
     
     # Deterministic heuristic for live connector
@@ -63,8 +100,5 @@ def after_retrieve(state: AgentState) -> str:
     
     if requires_live:
         return "live_registry_search"
-        
-    if state.get("abstain"):
-        return "log_and_serve"
         
     return "generate"

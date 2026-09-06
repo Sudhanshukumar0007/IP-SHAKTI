@@ -77,11 +77,17 @@ def init_db() -> None:
     conn.commit()
 
 
+from config import settings
+
 def log_query(state: dict) -> None:
     """Persist one completed query to the log. Accepts the full AgentState dict."""
     nat = state.get("retrieved_chunks_national") or []
     intl = state.get("retrieved_chunks_international") or []
     comp = state.get("confidence_components") or {}
+
+    raw_query = state.get("raw_query")
+    if not settings.ENABLE_DEV_TRACE and raw_query:
+        raw_query = "[MASKED FOR PRIVACY IN PRODUCTION]"
 
     conn = _get_conn()
     conn.execute("""
@@ -109,7 +115,7 @@ def log_query(state: dict) -> None:
     """, (
         state.get("session_id"),
         datetime.datetime.utcnow().isoformat(),
-        state.get("raw_query"),
+        raw_query,
         state.get("language"),
         state.get("jurisdiction_mode"),
         state.get("formulation_category"),

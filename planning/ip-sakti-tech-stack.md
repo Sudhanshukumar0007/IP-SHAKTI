@@ -8,23 +8,23 @@ Legend: **Decided** = locked in from our discussion. **Open** = not yet chosen, 
 
 | Layer | Choice | Status |
 |---|---|---|
-| API framework | FastAPI | Decided — switched from Flask for async streaming + LangGraph agent calls |
+| API framework | FastAPI | Decided — local FastAPI deployment for async streaming + LangGraph agent calls |
 | Orchestration | LangChain + LangGraph | Decided — graph nodes for classify → route → retrieve → generate → log |
 | Vector DB | ChromaDB | Decided — MVP scale |
 | Raw source storage | Original docs kept on disk alongside Chroma, for MVP | Decided |
-| Embedding model | Open-source multilingual embedder (exact model TBD — candidates: BGE-M3, multilingual-E5) | Open — pick once target languages beyond Hindi/English are finalized |
-| Generation model | Open-source LLM (exact model TBD) | Open — depends on available compute at build time |
+| Embedding model | intfloat/multilingual-e5-large via FastEmbed | Decided |
+| Generation model | llama-3.3-70b-versatile via Groq | Decided |
 | Translation / TTS / voice | Bhashini API | Decided — India-first, covers translate + tap-to-listen |
-| Task queue / async jobs | Not yet discussed (needed for scheduled corpus ingestion) | Open |
+| Task queue / async jobs | Local manual ingestion scripts (python ingest.py) | Decided for MVP |
 | Confidence scoring | Logged server-side per answer, excluded from user-facing API payload | Decided (mechanism TBD — e.g. retrieval-score + generation self-eval combo) |
 
 ## Frontend
 
 | Layer | Choice | Status |
 |---|---|---|
-| Framework | Not yet discussed | Open |
-| Chat/streaming | Must support token-by-token streaming from FastAPI | Decided (requirement, not a library pick yet) |
-| Jurisdiction toggle, "verify this act" PDF viewer, language selector, tap-to-listen | Custom components | Decided as required features; implementation library open |
+| Framework | Streamlit | Decided — for rapid MVP prototyping |
+| Chat/streaming | Streamlit native chat UI | Decided |
+| Jurisdiction toggle, "verify this act" PDF viewer, language selector, tap-to-listen | Custom components in Streamlit | Decided as required features |
 
 ## Data / corpus
 

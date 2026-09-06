@@ -7,19 +7,22 @@ import pymupdf4llm
 from dotenv import load_dotenv
 
 from langchain_chroma import Chroma
-from langchain_chroma import Chroma
-from langchain_community.embeddings import FastEmbedEmbeddings  # still usable via langchain-community but will migrate
-# NOTE: using fastembed directly via LangChain wrapper to avoid pydantic validation issue
-# in newer langchain-community versions that removed FastEmbedEmbeddings from the
-# langchain_community.embeddings.fastembed sub-module.
-from fastembed import TextEmbedding
-
-class FastEmbedEmbeddings:  # minimal shim
-    def __init__(self, model_name): self._m = TextEmbedding(model_name)
-    def embed_documents(self, texts): return list(self._m.embed(texts, batch_size=16))
-    def embed_query(self, text): return list(self._m.embed([text]))[0]
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.documents import Document
+from fastembed import TextEmbedding
+
+
+class FastEmbedEmbeddings:
+    """Minimal shim to avoid pydantic validation issues with langchain-community."""
+    def __init__(self, model_name):
+        self._m = TextEmbedding(model_name)
+
+    def embed_documents(self, texts):
+        return list(self._m.embed(texts, batch_size=16))
+
+    def embed_query(self, text):
+        return list(self._m.embed([text]))[0]
+
 
 load_dotenv()
 
@@ -27,31 +30,125 @@ CORPUS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'Corp
 CHROMA_DB_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'chroma_db'))
 REGISTRY_PATH = os.path.join(os.path.dirname(__file__), 'registry.json')
 
-# Embedding model is env-configurable so switching between e.g. multilingual-e5-small
-# and BGE-M3 doesn't require a code change. Changing this requires a full re-ingestion
+# Embedding model is env-configurable. Changing this requires a full re-ingestion
 # because vector dimensions differ between models.
-EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "intfloat/multilingual-e5-small")
+EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "intfloat/multilingual-e5-large")
 
 embeddings = FastEmbedEmbeddings(model_name=EMBEDDING_MODEL)
 
 national_collection = Chroma(
     collection_name="ip_sakti_national",
     embedding_function=embeddings,
-    persist_directory=CHROMA_DB_DIR
+    persist_directory=CHROMA_DB_DIR,
 )
 
 international_collection = Chroma(
     collection_name="ip_sakti_international",
     embedding_function=embeddings,
-    persist_directory=CHROMA_DB_DIR
+    persist_directory=CHROMA_DB_DIR,
 )
 
 text_splitter = RecursiveCharacterTextSplitter(
     separators=["\n\n", "\n", " "],
     chunk_size=1000,
     chunk_overlap=150,
-    length_function=len
+    length_function=len,
 )
+
+# ── Pre-processing ──────────────────────────────────────────────────────────────
+
+# Regex patterns for HTML-like artifacts emitted by pymupdf4llm
+_MARK_TAG_RE = re.compile(r'</?mark[^>]*>', re.IGNORECASE)
+# Collapse sequences of more than 2 blank lines that pymupdf4llm sometimes emits
+_EXCESS_BLANK_RE = re.compile(r'\n{3,}')
+
+
+def _clean_markdown(text: str) -> str:
+    """
+    Strip pymupdf4llm markup artifacts before chunking:
+      - <mark> / </mark> tags (pollute embeddings and confuse section regex)
+      - Other stray HTML tags that shouldn't be in legal text
+      - Excessive blank lines
+
+    This must run on the raw per-page text BEFORE the text is appended to
+    full_text and BEFORE the section splitter runs.
+    """
+    text = _MARK_TAG_RE.sub('', text)
+    # Strip any other HTML-like tags defensively
+    text = re.sub(r'<[^>]{1,60}>', '', text)
+    text = _EXCESS_BLANK_RE.sub('\n\n', text)
+    return text
+
+
+# ── Section-boundary-first chunking ────────────────────────────────────────────
+
+# Matches common legal document header patterns:
+#   Chapter 3, Section 100, Article IV, Rule 12, Regulation 5, Schedule II
+# Anchored to the start of a line (after optional heading hashes).
+_SECTION_HEADER_RE = re.compile(
+    r'(?i)^(?:#+\s*)?(C?hapter|S?ection|A?rticle|R?ule|R?egulation|S?chedule|P?art)\s+'
+    r'([0-9a-zA-Z\(\)\.\-]+(?:\s+[A-Z][a-z]+)?)',
+    re.MULTILINE,
+)
+
+# Amendment extraction pattern (e.g. "31. For section 39 of the principal Act...")
+_AMENDMENT_TARGET_RE = re.compile(
+    r'(?i)(?:for|of)\s+(?:section|article|rule)\s+([0-9a-zA-Z\(\)\.\-]+)\s+of\s+the\s+principal\s+act',
+    re.MULTILINE,
+)
+
+
+def extract_sections(markdown_text: str, is_amendment: bool = False):
+    """
+    Slice the document by section headers first, THEN sub-chunk within each section.
+
+    Strategy
+    --------
+    1. Find every section-header position in the full document.
+    2. Slice into (label, text) segments at those boundaries.
+    """
+    if is_amendment:
+        matches = list(_AMENDMENT_TARGET_RE.finditer(markdown_text))
+    else:
+        matches = list(_SECTION_HEADER_RE.finditer(markdown_text))
+
+    if not matches:
+        # No structural headers found — yield the whole document as one segment
+        yield "Unknown", markdown_text
+        return
+
+    # Yield preamble text before the first header (if any)
+    if matches[0].start() > 0:
+        preamble = markdown_text[: matches[0].start()].strip()
+        if preamble:
+            yield "Preamble/Intro", preamble
+
+    for i, match in enumerate(matches):
+        if is_amendment:
+            # "Amendment Target: Section 39"
+            section_label = f"Amendment Target: Section {match.group(1).strip().upper()}"
+        else:
+            # Build section label and fix drop-caps
+            type_str = match.group(1).title()
+            if type_str.endswith("hapter"): type_str = "Chapter"
+            elif type_str.endswith("ection"): type_str = "Section"
+            elif type_str.endswith("rticle"): type_str = "Article"
+            elif type_str.endswith("ule"): type_str = "Rule"
+            elif type_str.endswith("egulation"): type_str = "Regulation"
+            elif type_str.endswith("chedule"): type_str = "Schedule"
+            elif type_str.endswith("art"): type_str = "Part"
+            
+            section_label = f"{type_str} {match.group(2).strip()}"
+
+        start_idx = match.start()
+        end_idx = matches[i + 1].start() if i + 1 < len(matches) else len(markdown_text)
+        section_text = markdown_text[start_idx:end_idx].strip()
+
+        if not section_text:
+            continue
+
+        yield section_label, section_text
+
 
 def get_file_hash(filepath: str) -> str:
     hasher = hashlib.sha256()
@@ -62,38 +159,12 @@ def get_file_hash(filepath: str) -> str:
             buf = f.read(65536)
     return hasher.hexdigest()
 
-def extract_sections(markdown_text: str):
-    # Expanded regex to catch Chapter, Section, Article, Rule, Regulation, Schedule
-    header_regex = re.compile(
-        r'(?i)^(?:#+\s*)?(Chapter|Section|Article|Rule|Regulation|Schedule)\s+([0-9a-zA-Z\(\)\.\-]+)',
-        re.MULTILINE
-    )
-
-    matches = list(header_regex.finditer(markdown_text))
-
-    if not matches:
-        yield "Unknown", markdown_text
-        return
-
-    if matches[0].start() > 0:
-        preamble = markdown_text[0:matches[0].start()].strip()
-        if preamble:
-            yield "Preamble/Intro", preamble
-
-    for i, match in enumerate(matches):
-        section_label = f"{match.group(1)} {match.group(2)}".title()
-        start_idx = match.start()
-        end_idx = matches[i + 1].start() if i + 1 < len(matches) else len(markdown_text)
-
-        section_text = markdown_text[start_idx:end_idx].strip()
-        if section_text:
-            yield section_label, section_text
 
 def get_page_range(chunk_text: str, full_text: str, page_spans: list) -> tuple:
     """Return the (first_page, last_page) range that a chunk spans.
 
-    Uses strip-normalised search so that whitespace trimming by the text splitter
-    doesn't cause silent (1, 1) fallbacks.
+    Uses strip-normalised search so that whitespace trimming by the text
+    splitter doesn't cause silent (1, 1) fallbacks.
     """
     needle = chunk_text.strip()
     start_idx = full_text.find(needle)
@@ -111,6 +182,20 @@ def get_page_range(chunk_text: str, full_text: str, page_spans: list) -> tuple:
         return (1, 1)
 
     return (min(overlapping_pages), max(overlapping_pages))
+
+
+def _make_chunk_id(document_id: str, section_label: str, chunk_text: str) -> str:
+    """
+    Deterministic, content-based chunk ID.
+
+    Hash = SHA-256( document_id + section_label + first-200-chars-of-chunk ).
+    Using content rather than a sequential index means re-ingesting the same
+    PDF without any changes produces identical chunk IDs, so Chroma's
+    upsert-by-id is idempotent and a full wipe is not required.
+    """
+    fingerprint = f"{document_id}|{section_label}|{chunk_text[:200]}"
+    return hashlib.sha256(fingerprint.encode()).hexdigest()
+
 
 def ingest_corpus():
     registry = {}
@@ -158,7 +243,7 @@ def ingest_corpus():
                     print(f"Warning: could not read meta.json at {meta_path}: {e}. Using defaults.")
 
             pdfs = [fn for fn in os.listdir(act_dir) if fn.endswith('.pdf')]
-            act_docs_added = 0  # track docs added this act-folder for registry save
+            act_docs_added = 0
 
             for filename in pdfs:
                 parts = filename.replace('.pdf', '').split('_')
@@ -177,7 +262,7 @@ def ingest_corpus():
                     language = "en"
                     print(f"Warning: filename '{filename}' could not be parsed; using defaults.", flush=True)
 
-                # Document ID — stable across runs for the same PDF file in the same act
+                # Stable document ID — keyed on (jurisdiction, act_folder, filename, version)
                 document_id = hashlib.sha256(
                     f"{jurisdiction}_{act_folder}_{filename}_{version}".encode()
                 ).hexdigest()
@@ -199,35 +284,39 @@ def ingest_corpus():
                     print(f"Error reading {file_path}: {e}", flush=True)
                     continue
 
-                # Build full text and page spans for page-range attribution
+                # ── Build full_text: clean each page before concatenation ────
+                # _clean_markdown() must run HERE — before full_text is assembled
+                # and before extract_sections() runs — so <mark> tags don't
+                # reach the section regex or the embeddings.
                 full_text = ""
                 page_spans = []
                 for p in pages:
-                    p_text = p['text']
+                    p_text = _clean_markdown(p['text'])
                     p_num = p['metadata'].get('page', 1)
                     start_idx = len(full_text)
                     full_text += p_text + "\n"
                     end_idx = len(full_text)
                     page_spans.append((start_idx, end_idx, p_num))
 
-                # Canonical path for the "verify this act" registry and chunk metadata
                 source_pdf_path = os.path.join(
                     "Corpus", jurisdiction, act_folder, filename
                 ).replace('\\', '/')
 
                 docs = []
                 ids = []
-                global_chunk_idx = 0
 
-                for section_label, section_text in extract_sections(full_text):
+                # ── Section-boundary-first chunking ────────────────────────
+                # extract_sections() yields (authoritative_label, section_text).
+                # The label is derived from the header that precedes the text,
+                # so it is always correct — never re-derived after chunking.
+                is_amendment = doc_type == "amendment"
+                for section_label, section_text in extract_sections(full_text, is_amendment=is_amendment):
                     chunks = text_splitter.split_text(section_text)
 
                     for chunk in chunks:
-                        chunk_id = hashlib.sha256(
-                            f"{document_id}_{global_chunk_idx}".encode()
-                        ).hexdigest()
-                        global_chunk_idx += 1
-                        
+                        # Content-based deterministic ID — see _make_chunk_id()
+                        chunk_id = _make_chunk_id(document_id, section_label, chunk)
+
                         page_start, page_end = get_page_range(chunk, full_text, page_spans)
 
                         metadata = {
@@ -242,12 +331,8 @@ def ingest_corpus():
                             "page_start": page_start,
                             "page_end": page_end,
                             "last_verified_date": today,
-                            # Required by storage schema — feeds "verify this act" PDF viewer
                             "source_pdf_path": source_pdf_path,
-                            # Cross-jurisdiction links populated as a post-ingestion step.
-                            # Stored as a JSON-encoded string because Chroma only accepts
-                            # scalar metadata types (str/int/float/bool) — not lists.
-                            # Deserialize on the retrieval side with: json.loads(chunk.metadata["related_refs"])
+                            # Deserialize on retrieval side with json.loads()
                             "related_refs": json.dumps([]),
                         }
 
@@ -256,14 +341,31 @@ def ingest_corpus():
                         ids.append(chunk_id)
 
                 if docs:
-                    BATCH_SIZE = 16
-                    for i in range(0, len(docs), BATCH_SIZE):
-                        batch_docs = docs[i:i+BATCH_SIZE]
-                        batch_ids = ids[i:i+BATCH_SIZE]
-                        vectorstore.add_documents(documents=batch_docs, ids=batch_ids)
-                    total_chunks += len(docs)
+                    # Deduplicate by chunk_id before upsert.
+                    # OCR'd PDFs can produce empty/near-identical short pages
+                    # whose first-200-char hash collides. Same ID = same content
+                    # = same vector, so keeping the first occurrence is safe.
+                    seen_ids: set = set()
+                    deduped_docs = []
+                    deduped_ids = []
+                    for doc, cid in zip(docs, ids):
+                        if cid not in seen_ids:
+                            seen_ids.add(cid)
+                            deduped_docs.append(doc)
+                            deduped_ids.append(cid)
+                    dropped = len(docs) - len(deduped_docs)
+                    if dropped:
+                        print(f"  [dedup] dropped {dropped} duplicate chunks", flush=True)
 
-                # Update in-memory registry
+                    BATCH_SIZE = 16
+                    for i in range(0, len(deduped_docs), BATCH_SIZE):
+                        batch_docs = deduped_docs[i:i + BATCH_SIZE]
+                        batch_ids = deduped_ids[i:i + BATCH_SIZE]
+                        vectorstore.add_documents(documents=batch_docs, ids=batch_ids)
+                    total_chunks += len(deduped_docs)
+                    print(f"  → {len(deduped_docs)} chunks added", flush=True)
+
+                # Update registry — keyed by document_id (stable hash)
                 registry[document_id] = {
                     "act_name": display_act_name,
                     "jurisdiction": jurisdiction,
@@ -282,7 +384,7 @@ def ingest_corpus():
                 with open(REGISTRY_PATH, 'w', encoding='utf-8') as f:
                     json.dump(registry, f, indent=4)
 
-    # Final registry flush to capture any state not written mid-loop
+    # Final registry flush
     with open(REGISTRY_PATH, 'w', encoding='utf-8') as f:
         json.dump(registry, f, indent=4)
 
@@ -291,8 +393,9 @@ def ingest_corpus():
         f"Ingested: {total_ingested} PDFs | "
         f"Skipped (unchanged): {total_skipped} | "
         f"Chunks added: {total_chunks}",
-        flush=True
+        flush=True,
     )
+
 
 if __name__ == "__main__":
     print(f"Starting ingestion... (embedding model: {EMBEDDING_MODEL})", flush=True)
