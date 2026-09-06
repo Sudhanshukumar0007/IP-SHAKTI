@@ -8,5 +8,16 @@ __pycache__/
 .coverage
 htmlcov/
 backend/query_log.db
+backend/.sessions.json
 chroma_db/
 .DS_Store
+worklog/
+frontend/node_modules/
+frontend/dist/
+frontend/.freebuff/
+scratch/
+scratch_*.txt
+*.zip
+audit.md
+frontend_audit.md
+*audit.md
