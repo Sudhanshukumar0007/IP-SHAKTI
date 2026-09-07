@@ -36,7 +36,7 @@ function StreamingText({ text }) {
 function MessageBubble({ msg, language, jurisdiction, onViewReferences }) {
   const [playing, setPlaying] = useState(false);
 
-  if (msg.type === "research") return <ResearchCard data={msg.researchData} language={language} onViewReferences={onViewReferences} />;
+  if (msg.type === "research") return <ResearchCard data={msg.researchData} language={language} onViewReferences={onViewReferences} msgId={msg.id} />;
 
   const isUser = msg.role === "user";
 
@@ -75,7 +75,7 @@ function MessageBubble({ msg, language, jurisdiction, onViewReferences }) {
       <div className={isUser ? "user-message" : `assistant-message jurisdiction-${jurisdiction} has-mic`}>
         <div className="message-text-row">
           <span className="message-text">
-            {msg.streaming ? <StreamingText text={msg.text} /> : msg.text}
+            {isUser ? msg.text : <TypewriterText text={msg.text || ""} onViewCitation={() => {}} msgId={msg.id} />}
           </span>
           {!isUser && !msg.streaming && msg.text && (
             <button
@@ -259,45 +259,76 @@ function parseCitations(text, onViewCitation) {
   return parts.length > 0 ? parts : text;
 }
 
-function AnswerRenderer({ answer, onViewCitation }) {
+function TypewriterText({ text, onViewCitation, msgId }) {
+  const [displayedText, setDisplayedText] = useState("");
+  const [shouldAnimate] = useState(() => {
+    // Only animate if the message was created less than 2 seconds ago
+    if (!msgId) return false;
+    return (Date.now() - Math.floor(msgId)) < 2000;
+  });
+
+  useEffect(() => {
+    if (!shouldAnimate || !text) {
+      setDisplayedText(text || "");
+      return;
+    }
+
+    let index = 0;
+    const charsPerTick = 5;
+    const interval = setInterval(() => {
+      index += charsPerTick;
+      if (index >= text.length) {
+        index = text.length;
+        clearInterval(interval);
+      }
+      setDisplayedText(text.substring(0, index));
+    }, 10);
+    
+    return () => clearInterval(interval);
+  }, [text, shouldAnimate]);
+
+  return <>{parseCitations(displayedText, onViewCitation)}</>;
+}
+
+function AnswerRenderer({ answer, onViewCitation, msgId }) {
   if (!answer) return null;
   if (typeof answer === 'string') {
-    return <p style={{whiteSpace: 'pre-wrap'}}>{parseCitations(answer, onViewCitation)}</p>;
+    return <p style={{whiteSpace: 'pre-wrap'}}><TypewriterText text={answer} onViewCitation={onViewCitation} msgId={msgId} /></p>;
   }
   if (typeof answer === 'object') {
     if (answer.answer) {
-      return <p style={{whiteSpace: 'pre-wrap'}}>{parseCitations(answer.answer, onViewCitation)}</p>;
+      return <p style={{whiteSpace: 'pre-wrap'}}><TypewriterText text={answer.answer} onViewCitation={onViewCitation} msgId={msgId} /></p>;
     }
     return (
       <div className="disclosure-fields">
         {answer.regulatory_classification && (
           <div className="field" style={{marginTop: 12}}>
             <strong>Regulatory Classification:</strong> 
-            <p style={{whiteSpace: 'pre-wrap', marginTop: 4}}>{parseCitations(answer.regulatory_classification, onViewCitation)}</p>
+            <p style={{whiteSpace: 'pre-wrap', marginTop: 4}}><TypewriterText text={answer.regulatory_classification} onViewCitation={onViewCitation} msgId={msgId} /></p>
           </div>
         )}
         {answer.ip_regimes_applicable && (
           <div className="field" style={{marginTop: 12}}>
             <strong>Applicable IP Regimes:</strong> 
-            <p style={{whiteSpace: 'pre-wrap', marginTop: 4}}>{parseCitations(answer.ip_regimes_applicable, onViewCitation)}</p>
+            <p style={{whiteSpace: 'pre-wrap', marginTop: 4}}><TypewriterText text={answer.ip_regimes_applicable} onViewCitation={onViewCitation} msgId={msgId} /></p>
           </div>
         )}
         {answer.patentability_posture && (
           <div className="field" style={{marginTop: 12}}>
             <strong>Patentability Posture:</strong> 
-            <p style={{whiteSpace: 'pre-wrap', marginTop: 4}}>{parseCitations(answer.patentability_posture, onViewCitation)}</p>
+            <p style={{whiteSpace: 'pre-wrap', marginTop: 4}}><TypewriterText text={answer.patentability_posture} onViewCitation={onViewCitation} msgId={msgId} /></p>
           </div>
         )}
         {answer.abs_exposure && (
           <div className="field" style={{marginTop: 12}}>
             <strong>ABS & Biodiversity Exposure:</strong> 
-            <p style={{whiteSpace: 'pre-wrap', marginTop: 4}}>{parseCitations(answer.abs_exposure, onViewCitation)}</p>
+            <p style={{whiteSpace: 'pre-wrap', marginTop: 4}}><TypewriterText text={answer.abs_exposure} onViewCitation={onViewCitation} msgId={msgId} /></p>
           </div>
         )}
         {answer.tkdl_relevance && (
           <div className="field" style={{marginTop: 12}}>
             <strong>TKDL Relevance:</strong> 
-            <p style={{whiteSpace: 'pre-wrap', marginTop: 4}}>{parseCitations(answer.tkdl_relevance, onViewCitation)}</p>
+            <p style={{whiteSpace: 'pre-wrap', marginTop: 4}}><TypewriterText text={answer.tkdl_relevance} onViewCitation={onViewCitation} msgId={msgId} /></p>
           </div>
         )}
       </div>
@@ -376,7 +407,7 @@ function SpeakButton({ text }) {
 }
 
 /* ===================== RESEARCH CARD ===================== */
-function ResearchCard({ data, onViewReferences }) {
+function ResearchCard({ data, onViewReferences, msgId }) {
   const { jurisdiction_mode, formulation_category, abstained, abstain_reason, national_answer, international_answer, national_citations, international_citations, overall_status, execution_trace } = data;
   const hasNational = jurisdiction_mode === "national" || jurisdiction_mode === "both";
   const hasInternational = jurisdiction_mode === "international" || jurisdiction_mode === "both";
@@ -438,7 +469,7 @@ function ResearchCard({ data, onViewReferences }) {
                     <h3 style={{margin: 0}}>National (India) Guidance</h3>
                     <SpeakButton text={national_answer} />
                   </div>
-                  <AnswerRenderer answer={national_answer} onViewCitation={handleCitationClick} />
+                  <AnswerRenderer answer={national_answer} onViewCitation={handleCitationClick} msgId={msgId} />
                 </section>
               )}
               {hasInternational && international_answer && (
@@ -447,7 +478,7 @@ function ResearchCard({ data, onViewReferences }) {
                     <h3 style={{margin: 0}}>International Guidance</h3>
                     <SpeakButton text={international_answer} />
                   </div>
-                  <AnswerRenderer answer={international_answer} onViewCitation={handleCitationClick} />
+                  <AnswerRenderer answer={international_answer} onViewCitation={handleCitationClick} msgId={msgId} />
                 </section>
               )}
               {overall_status !== "VERIFIED" && overall_status !== "UNKNOWN" && (

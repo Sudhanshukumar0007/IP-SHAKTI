@@ -41,7 +41,7 @@ AyurLex is powered by a **LangGraph** state machine.
 - **Vector DB:** ChromaDB (split into `ip_sakti_national` and `ip_sakti_international` collections)
 - **Database:** SQLite (`query_log.db`) for evaluation metrics
 - **Rate Limiting:** `slowapi`
-- **LLM:** `llama-3.3-70b-versatile` (via Groq, configurable)
+- **LLM:** `openai/gpt-oss-20b` (via Groq, configurable)
 
 ### Frontend
 - **Framework:** React + React Router + Vite
