@@ -114,6 +114,7 @@ class AgentState(TypedDict):
     clarification_attempts: int            # how many times we've returned a clarification question
     formulation_category: Optional[str]   # resolved leaf enum, or None until resolved
                                            # special value: "classification_failed" after max attempts
+    classification_confirmed: Optional[bool] # whether the user has confirmed the classification
 
     # ── Multi-Agent Orchestration (Supervisor / Worker) ────────────────────────
     research_tasks: list[ResearchTask]
@@ -128,6 +129,7 @@ class AgentState(TypedDict):
     # which aggregates the chunks from task_results to maintain compatibility with generate.
     retrieved_chunks_national: list       # list[ChunkResult]
     retrieved_chunks_international: list  # list[ChunkResult]
+    unresolved_references: list           # list[str] of references that could not be resolved or were cross-jurisdictional
 
     # ── Generation — kept separate per jurisdiction, NEVER blended ─────────────
     # This structural separation (not just a prompt instruction) makes
@@ -141,8 +143,11 @@ class AgentState(TypedDict):
     # Log all components separately so evaluation can tune thresholds empirically.
     confidence_components: dict           # {max_similarity, mean_similarity, relevant_chunk_count, disclosure_fill_rate}
     confidence_score: float               # heuristic composite — NOT a calibrated probability
+    confidence_band: str                  # "HIGH" | "MEDIUM" | "LOW"
     abstain: bool
     abstain_reason: Optional[str]
+    validation_failures: int
+    validation_feedback: Optional[str]
 
     # ── Live Connector Agentic Pipeline ────────────────────────────────────────
     live_evidence: list                   # list[dict] with source, url, evidence, etc.
@@ -154,4 +159,3 @@ class AgentState(TypedDict):
     llm_calls_made: int
     latency_ms: Optional[float]
     start_time: Optional[float]           # time.time() at request entry, for latency calc
-

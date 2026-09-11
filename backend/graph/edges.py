@@ -53,12 +53,16 @@ def after_classify(state: AgentState) -> str:
        this is the "loop" at the conversation level.
     """
     category = state.get("formulation_category")
+    confirmed = state.get("classification_confirmed", False)
 
     if category == "classification_failed":
         return "classification_failed"
 
     if category is not None:
-        return "supervisor"
+        if category == "informational" or confirmed:
+            return "supervisor"
+        else:
+            return "__end__"
 
     # pending_clarification is set — end this turn, frontend asks the user
     return "__end__"
@@ -80,25 +84,21 @@ def after_worker(state: AgentState) -> str:
 def after_verification(state: AgentState) -> str:
     """
     After evidence_verification:
-      - Overall status is ABSTAIN → skip generate & score, go to log_and_serve
-      - Coverage sufficient (VERIFIED or PARTIAL):
-          - Query requires live factual data? → live_registry_search
-          - Otherwise → generate
+      - If the primary corpus retrieval abstains (failed to find sufficient evidence),
+        fall back to live_registry_search (secondary verification via Gemini).
+      - Otherwise, proceed to generate using the corpus evidence.
     """
     if state.get("abstain"):
-        return "log_and_serve"
-        
-    query = state.get("raw_query", "").lower()
-    
-    # Deterministic heuristic for live connector
-    live_keywords = [
-        "patent", "trademark", "status", "pending", "live", "recent", 
-        "registry", "registered", "application", "search"
-    ]
-    
-    requires_live = any(kw in query for kw in live_keywords) and len(query.split()) > 3
-    
-    if requires_live:
         return "live_registry_search"
         
     return "generate"
+
+def after_validate(state: AgentState) -> str:
+    """
+    After validate_response:
+    - If validation_feedback exists, loop back to generate to fix the issues.
+    - Otherwise, proceed to score_confidence.
+    """
+    if state.get("validation_feedback"):
+        return "generate"
+    return "score_confidence"

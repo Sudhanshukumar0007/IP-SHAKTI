@@ -64,6 +64,7 @@ def init_db() -> None:
             relevant_chunk_count            INTEGER,
             disclosure_fill_rate            REAL,
             confidence_score                REAL,
+            confidence_band                 TEXT,
 
             -- Abstention
             abstain                         INTEGER,
@@ -71,11 +72,26 @@ def init_db() -> None:
 
             -- Cost/perf
             llm_calls_made                  INTEGER,
-            latency_ms                      REAL
+            latency_ms                      REAL,
+
+            -- Full state for eval trace rendering
+            full_state                      TEXT
         )
     """)
     conn.commit()
+    
+    # Try to add the new column to existing databases
+    try:
+        conn.execute("ALTER TABLE query_log ADD COLUMN confidence_band TEXT")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass  # Column already exists
 
+    try:
+        conn.execute("ALTER TABLE query_log ADD COLUMN full_state TEXT")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass  # Column already exists
 
 from config import settings
 
@@ -98,9 +114,9 @@ def log_query(state: dict) -> None:
             similarities_national, similarities_intl,
             national_citations, international_citations,
             max_similarity, mean_similarity, relevant_chunk_count,
-            disclosure_fill_rate, confidence_score,
+            disclosure_fill_rate, confidence_score, confidence_band,
             abstain, abstain_reason,
-            llm_calls_made, latency_ms
+            llm_calls_made, latency_ms, full_state
         ) VALUES (
             ?, ?, ?, ?, ?,
             ?, ?,
@@ -108,9 +124,9 @@ def log_query(state: dict) -> None:
             ?, ?,
             ?, ?,
             ?, ?, ?,
+            ?, ?, ?,
             ?, ?,
-            ?, ?,
-            ?, ?
+            ?, ?, ?
         )
     """, (
         state.get("session_id"),
@@ -131,10 +147,12 @@ def log_query(state: dict) -> None:
         comp.get("relevant_chunk_count"),
         comp.get("disclosure_fill_rate"),
         state.get("confidence_score"),
+        state.get("confidence_band"),
         1 if state.get("abstain") else 0,
         state.get("abstain_reason"),
         state.get("llm_calls_made"),
         state.get("latency_ms"),
+        json.dumps(state)
     ))
     conn.commit()
 

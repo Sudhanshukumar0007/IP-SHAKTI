@@ -1,110 +1,130 @@
-import React, { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
+import { motion } from 'framer-motion';
+import { ArrowLeft, ArrowRight, Trash2, Inbox } from 'lucide-react';
 
-const EvalList = () => {
-  const [sessions, setSessions] = useState([]);
+const STORAGE_KEY = 'ipshakti_chats';
 
-  useEffect(() => {
+const listVariants = {
+  hidden: {},
+  show: { transition: { staggerChildren: 0.04 } },
+};
+
+const rowVariants = {
+  hidden: { opacity: 0, y: 6 },
+  show: { opacity: 1, y: 0, transition: { duration: 0.25 } },
+};
+
+function EvalList() {
+  const [sessions, setSessions] = useState(() => {
     try {
-      const saved = localStorage.getItem("ayurlex_sessions_v2");
+      const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (parsed.chatHistory && parsed.chatHistory.length > 0) {
-          // Filter duplicates just in case
-          const uniqueSessions = parsed.chatHistory.filter((v,i,a)=>a.findIndex(t=>(t.id === v.id))===i);
-          setSessions(uniqueSessions);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed.filter(
+            (v, i, a) => a.findIndex((t) => t.id === v.id) === i
+          );
         }
       }
     } catch (e) {
-      console.error("Failed to load sessions for EvalList", e);
+      console.error('Failed to load sessions for EvalList', e);
     }
-  }, []);
+    return [];
+  });
 
-  const handleClearData = async () => {
-    if (window.confirm("Are you sure you want to clear all session history from this browser?")) {
-      localStorage.removeItem("ayurlex_sessions_v2");
+  const handleClearData = () => {
+    if (window.confirm('Are you sure you want to clear all session history from this browser?')) {
+      localStorage.removeItem(STORAGE_KEY);
       setSessions([]);
-      // We can also clear the backend database via a quick API call if we wanted, 
-      // but the user asked us to delete the DB file which we'll do in the terminal.
-      alert("Browser session history cleared! Please refresh the page.");
+      alert('Browser session history cleared! Please refresh the page.');
     }
   };
 
   return (
-    <div style={{ padding: '40px', maxWidth: '800px', margin: '0 auto', fontFamily: 'Inter, sans-serif', overflowY: 'auto', height: '100%', width: '100%' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '30px' }}>
-        <div style={{ display: 'flex', alignItems: 'center' }}>
-          <Link to="/" style={{ textDecoration: 'none', color: '#555', marginRight: '20px', fontSize: '20px' }}>&larr;</Link>
-          <h1 style={{ fontSize: '28px', color: '#333', margin: 0 }}>Evaluation Directory</h1>
-        </div>
-        <button 
-          onClick={handleClearData}
-          style={{ padding: '8px 16px', background: '#ff4d4f', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
-        >
-          🗑️ Clear All Sessions
-        </button>
-      </div>
-      
-      <p style={{ color: '#666', marginBottom: '30px' }}>Select a session below to view its detailed orchestration metrics and evaluation data.</p>
-
-      {sessions.length === 0 ? (
-        <div style={{ padding: '20px', background: '#f9f9f9', borderRadius: '8px', color: '#888' }}>
-          No sessions found in this browser.
-        </div>
-      ) : (
-        <div style={{ display: 'grid', gap: '12px', paddingBottom: '40px' }}>
-          {sessions.map(session => (
-            <Link 
-              key={session.id} 
-              to={session.backendSessionId ? `/eval/${session.backendSessionId}` : '#'}
-              onClick={(e) => {
-                if (!session.backendSessionId) {
-                  e.preventDefault();
-                  alert("This is an older session without a backend ID and cannot be evaluated.");
-                }
-              }}
-              style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                padding: '16px 20px',
-                background: '#fff',
-                border: '1px solid #eee',
-                borderRadius: '8px',
-                textDecoration: 'none',
-                color: session.backendSessionId ? '#333' : '#aaa',
-                boxShadow: '0 2px 4px rgba(0,0,0,0.02)',
-                transition: 'all 0.2s',
-                opacity: session.backendSessionId ? 1 : 0.6
-              }}
-              onMouseEnter={(e) => { 
-                if (session.backendSessionId) {
-                  e.currentTarget.style.borderColor = '#ccc'; 
-                  e.currentTarget.style.transform = 'translateY(-1px)'; 
-                }
-              }}
-              onMouseLeave={(e) => { 
-                if (session.backendSessionId) {
-                  e.currentTarget.style.borderColor = '#eee'; 
-                  e.currentTarget.style.transform = 'none'; 
-                }
-              }}
+    <div className="min-h-screen w-full overflow-y-auto bg-[#F2EBDD] text-[#26312A] font-sans">
+      <div className="mx-auto max-w-5xl px-6 py-10 lg:px-8">
+        {/* HEADER */}
+        <div className="flex items-center justify-between mb-8">
+          <div className="flex items-center gap-4">
+            <Link
+              to="/"
+              className="flex items-center justify-center w-9 h-9 rounded-lg border bg-white text-[#26312A] transition hover:bg-[#F4E8CB]"
+              style={{ borderColor: "#D8D0BA" }}
+              aria-label="Back to research"
             >
-              <div>
-                <strong style={{ display: 'block', fontSize: '16px', marginBottom: '4px' }}>
-                  {session.title || 'Untitled Session'}
-                </strong>
-                <span style={{ fontSize: '12px', color: '#999' }}>ID: {session.backendSessionId || session.id}</span>
-              </div>
-              <div style={{ background: '#f0f4f8', padding: '6px 12px', borderRadius: '4px', fontSize: '14px', color: session.backendSessionId ? '#444' : '#999' }}>
-                View &rarr;
-              </div>
+              <ArrowLeft size={16} strokeWidth={2} />
             </Link>
-          ))}
+            <div className="flex flex-col">
+              <div className="mb-1 text-[9px] font-semibold tracking-[.17em] text-[#817A63]">INTERNAL EVALUATION</div>
+              <h1 className="font-['Newsreader'] text-2xl font-semibold tracking-tight leading-none text-[#26312A]">
+                Research sessions
+              </h1>
+              <span className="text-[10px] text-[#9C9679] mt-1">
+                Session history stored in this browser
+              </span>
+            </div>
+          </div>
+
+          {sessions.length > 0 && (
+            <button
+              onClick={handleClearData}
+              className="flex items-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-semibold text-[#7A2E2E] transition hover:bg-white" style={{ borderColor: "#7A2E2E30" }}
+            >
+              <Trash2 size={13} /> Clear all sessions
+            </button>
+          )}
         </div>
-      )}
+
+        {/* LIST */}
+        {sessions.length === 0 ? (
+          <div className="mt-12 flex flex-col items-center justify-center gap-3 rounded-3xl border border-dashed bg-[#F7F4EB] py-24" style={{ borderColor: "#D8D0BA" }}>
+            <Inbox size={22} className="text-[#2F6B3E]/40" />
+            <span className="text-[10px] font-mono tracking-[.16em] text-[#9C9679] uppercase">
+              No sessions found
+            </span>
+          </div>
+        ) : (
+          <motion.div variants={listVariants} initial="hidden" animate="show" className="flex flex-col gap-2">
+            {sessions.map((session) => {
+              const usable = Boolean(session.id);
+              return (
+                <motion.div key={session.id} variants={rowVariants}>
+                  <Link
+                    to={usable ? `/eval/${session.id}` : '#'}
+                    onClick={(e) => {
+                      if (!usable) {
+                        e.preventDefault();
+                        alert('This is an older session without a backend ID and cannot be evaluated.');
+                      }
+                    }}
+                    className={`group flex items-center justify-between gap-4 px-5 py-4 bg-white border border-zinc-200/50 border-l-2 transition-colors ${
+                      usable
+                        ? 'border-l-transparent hover:border-l-forest hover:bg-forest/5'
+                        : 'border-l-transparent opacity-50 cursor-not-allowed'
+                    }`}
+                  >
+                    <div className="min-w-0">
+                      <strong className={`block text-sm font-semibold tracking-tight truncate ${usable ? 'text-[#26312A]' : 'text-[#9C9679]'}`}>
+                        {session.title || 'Untitled Session'}
+                      </strong>
+                      <span className="text-[9px] font-mono text-[#9C9679]">
+                        ID: {session.id}
+                      </span>
+                    </div>
+                    <div className={`flex items-center gap-1 text-xs font-semibold shrink-0 ${usable ? 'text-[#2F6B3E]' : 'text-[#9C9679]'}`}>
+                      View
+                      <ArrowRight size={13} className={usable ? 'transition-transform group-hover:translate-x-0.5' : ''} />
+                    </div>
+                  </Link>
+                </motion.div>
+              );
+            })}
+          </motion.div>
+        )}
+      </div>
     </div>
   );
-};
+}
 
 export default EvalList;

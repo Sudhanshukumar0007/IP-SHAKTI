@@ -25,6 +25,7 @@ pymupdf4llm>=0.0.2
 
 # Embeddings
 fastembed>=0.2.7
+sentence-transformers>=2.7.0
 
 # Validation
 pydantic>=2.0.0
@@ -33,7 +34,8 @@ pydantic>=2.0.0
 python-dotenv>=1.0.0
 tenacity>=8.0.0
 
-# Search
+# Search / Live Connector
+google-genai>=0.2.0
 duckduckgo-search>=5.0.0
 
 # Legacy — kept for backward compatibility if any other code references it

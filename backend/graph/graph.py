@@ -18,7 +18,7 @@ Flow:
                   _failed)             │              │
                         │          supervisor       [END]
                         │              │
-                        │       sequential_worker
+                        │      parallel_worker   ← ALL tasks run concurrently
                         │              │
                         │    evidence_verification
                         │              │
@@ -45,14 +45,15 @@ from graph.nodes import (
     auto_classify,
     classify_formulation,
     supervisor,
-    worker,
+    parallel_worker,
     evidence_verification,
     live_registry_search,
     generate,
+    validate_response,
     score_confidence,
     log_and_serve,
 )
-from graph.edges import after_intent, after_classify, after_worker, after_verification
+from graph.edges import after_intent, after_classify, after_verification, after_validate
 
 # ── Build the graph ────────────────────────────────────────────────────────────
 
@@ -63,10 +64,11 @@ builder.add_node("detect_intent", detect_intent)
 builder.add_node("auto_classify", auto_classify)
 builder.add_node("classify_formulation", classify_formulation)
 builder.add_node("supervisor", supervisor)
-builder.add_node("worker", worker)
+builder.add_node("parallel_worker", parallel_worker)   # replaces sequential worker loop
 builder.add_node("evidence_verification", evidence_verification)
 builder.add_node("live_registry_search", live_registry_search)
 builder.add_node("generate", generate)
+builder.add_node("validate_response", validate_response)
 builder.add_node("score_confidence", score_confidence)
 builder.add_node("log_and_serve", log_and_serve)
 
@@ -93,18 +95,9 @@ builder.add_conditional_edges(
     },
 )
 
-# Supervisor routes to worker loop
-builder.add_edge("supervisor", "worker")
-
-# Worker loops until tasks are done, then to evidence_verification
-builder.add_conditional_edges(
-    "worker",
-    after_worker,
-    {
-        "worker": "worker",
-        "evidence_verification": "evidence_verification",
-    },
-)
+# Supervisor → parallel_worker (single node, all tasks concurrent, no loop)
+builder.add_edge("supervisor", "parallel_worker")
+builder.add_edge("parallel_worker", "evidence_verification")
 
 # evidence_verification → generate or abstain short-circuit
 builder.add_conditional_edges(
@@ -117,7 +110,17 @@ builder.add_conditional_edges(
     },
 )
 builder.add_edge("live_registry_search", "generate")
-builder.add_edge("generate", "score_confidence")
+builder.add_edge("generate", "validate_response")
+
+builder.add_conditional_edges(
+    "validate_response",
+    after_validate,
+    {
+        "generate": "generate",
+        "score_confidence": "score_confidence",
+    },
+)
+
 builder.add_edge("score_confidence", "log_and_serve")
 builder.add_edge("log_and_serve", END)
 

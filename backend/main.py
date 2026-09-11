@@ -237,13 +237,22 @@ def chat(request: Request, req: ChatRequest):
         state["language"] = req.language
 
     if _is_clarification_answer(req.message, state):
-        # Append gate answer + record in clarification_history
         question_asked = state["pending_clarification"]
-        state["formulation_answers"] = list(state.get("formulation_answers") or []) + [
-            req.message.strip().lower()
-        ]
+        answer_text = req.message.strip().lower()
+        
+        if state.get("formulation_category") and not state.get("classification_confirmed"):
+            if answer_text == "yes":
+                state["classification_confirmed"] = True
+            else:
+                state["formulation_category"] = None
+                state["classification_confirmed"] = False
+                state["formulation_answers"] = [] # Reset answers so they can try again or just pass it as a new query
+                # Not appending to answers since they rejected it
+        else:
+            state["formulation_answers"] = list(state.get("formulation_answers") or []) + [answer_text]
+            
         history = list(state.get("clarification_history") or [])
-        history.append({"question": question_asked, "answer": req.message.strip().lower()})
+        history.append({"question": question_asked, "answer": answer_text})
         state["clarification_history"] = history
         state["pending_clarification"] = None  # will be re-set by classify node if needed
     else:
@@ -262,11 +271,19 @@ def chat(request: Request, req: ChatRequest):
         result_state: dict = langgraph_app.invoke(state)
     except Exception as e:
         import traceback
+        import logging
+        logging.error("Graph execution failed:")
         traceback.print_exc()
-        err_msg = str(e)
-        if "429" in err_msg or "rate limit" in err_msg.lower() or "too many requests" in err_msg.lower():
-            raise HTTPException(status_code=503, detail="LLM provider rate-limited. High demand, please try again shortly.")
-        raise HTTPException(status_code=500, detail=f"Internal Server Error: {err_msg}")
+        
+        trace = state.get("execution_trace", [])
+        trace.append(f"[ERROR] Graph execution failed: {str(e)}")
+        
+        # Gracefully handle the error rather than throwing an HTTP 500/503
+        result_state = dict(state)
+        result_state["abstain"] = True
+        result_state["abstain_reason"] = "Your request could not be processed due to a provider error or safety filter. Please rephrase your query."
+        result_state["overall_status"] = "ERROR"
+        result_state["execution_trace"] = trace
 
     # Persist final state back to the session store
     session_store.update_session(req.session_id, result_state)
@@ -295,6 +312,22 @@ def chat(request: Request, req: ChatRequest):
             question_index=len(answers_so_far),
             clarification_history=result_state.get("clarification_history") or [],
         )
+        
+    # Case 1.5: classification resolved, but needs confirmation
+    if result_state.get("formulation_category") and result_state["formulation_category"] not in ("classification_failed", "informational") and not result_state.get("classification_confirmed"):
+        cat = result_state["formulation_category"]
+        question = f"I have classified this as {cat}. Is this correct?"
+        
+        result_state["pending_clarification"] = question
+        session_store.update_session(req.session_id, result_state)
+        
+        answers_so_far = result_state.get("formulation_answers") or []
+        return ClarificationResponse(
+            type="clarification",
+            question=question,
+            question_index=len(answers_so_far),
+            clarification_history=result_state.get("clarification_history") or [],
+        )
 
     # Case 2: abstained — return abstain notice (no answer, no internal score)
     if result_state.get("abstain"):
@@ -309,6 +342,7 @@ def chat(request: Request, req: ChatRequest):
         )
 
     # Case 3: fully generated answer
+
     return AnswerResponse(
         type="answer",
         jurisdiction_mode=result_state.get("jurisdiction_mode", ""),
@@ -416,50 +450,27 @@ def get_eval_graph():
 def get_session_eval_metrics(session_id: str):
     import sqlite3
     db_path = "query_log.db"
+    
     if not os.path.exists(db_path) and not session_store.get_session(session_id):
-        return {"total_queries": 0, "abstention_rate": 0, "avg_confidence": 0, "categories": [], "abstention_reasons": [], "chunks": [], "execution_trace": [], "confidence_components": {}}
+        return {"queries": []}
     
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     c = conn.cursor()
-    c.execute("SELECT * FROM query_log WHERE session_id = ?", (session_id,))
+    c.execute("SELECT * FROM query_log WHERE session_id = ? ORDER BY id ASC", (session_id,))
     rows = c.fetchall()
     conn.close()
 
     if not rows and not session_store.get_session(session_id):
-        return {
-            "total_queries": 0, "abstention_rate": 0, "avg_confidence": 0,
-            "categories": [], "abstention_reasons": [], "chunks": [],
-            "execution_trace": [], "confidence_components": {}
-        }
+        return {"queries": []}
 
-    total = len(rows)
-    abstained = sum(1 for r in rows if r["abstain"])
-    confidences = [r["confidence_score"] for r in rows if r["confidence_score"] is not None]
-    avg_conf = round(sum(confidences) / len(confidences), 2) if confidences else 0
+    # If we have no rows but we have a live session, we'll wrap the live session in a fake row
+    if not rows:
+        live_state = session_store.get_session(session_id)
+        if live_state:
+            rows = [{"full_state": json.dumps(live_state), "id": -1, "timestamp": "", "raw_query": live_state.get("raw_query", "")}]
 
-    cats = {}
-    reasons = {}
-    for r in rows:
-        cat = r["formulation_category"] or "Unknown"
-        cats[cat] = cats.get(cat, 0) + 1
-        if r["abstain"]:
-            reason = r["abstain_reason"] or "Unknown"
-            reasons[reason] = reasons.get(reason, 0) + 1
-
-    categories_list = [{"name": k, "count": v} for k,v in cats.items()]
-    reasons_list = [{"name": k, "count": v} for k,v in reasons.items()]
-
-    trace = []
-    task_results = []
-    overall_status = "UNAVAILABLE"
-    abstain = False
-    abstain_reason = None
-    avg_conf = None
-    node_details = {}
-    
-    state = session_store.get_session(session_id)
-    if state:
+    def _build_metrics(row, state):
         trace = state.get("execution_trace") or []
         task_results = state.get("task_results") or []
         overall_status = state.get("overall_status") or "UNAVAILABLE"
@@ -467,13 +478,8 @@ def get_session_eval_metrics(session_id: str):
         abstain_reason = state.get("abstain_reason") or None
         
         overall_status_normalized = "ABSTAINED" if overall_status == "ABSTAIN" else overall_status
+        avg_conf = state.get("confidence_score")
         
-        # Check if query actually completed. If it crashed or is incomplete, confidence is UNAVAILABLE
-        # We assume if overall_status is set, or if it hit log_and_serve (which sets abstain), it's a genuine run
-        if state.get("overall_status") is not None or abstain or total > 0:
-            avg_conf = state.get("confidence_score")
-        
-        # Build node records (duration_ms is null for now as it's not tracked natively)
         node_details = {
             "detect_intent": { "status": "PASSED" if state.get("jurisdiction_mode") else "PENDING" },
             "auto_classify": { "status": "PASSED" if state.get("formulation_category") else "PENDING" },
@@ -498,6 +504,13 @@ def get_session_eval_metrics(session_id: str):
             "generate": {
                 "status": "PASSED" if overall_status_normalized in ("VERIFIED", "PARTIAL") else "SKIPPED"
             },
+            "validate_response": {
+                "status": "FAILED" if state.get("validation_failures", 0) > 0 else ("PASSED" if overall_status_normalized in ("VERIFIED", "PARTIAL") else "SKIPPED"),
+                "details": {
+                    "failures": state.get("validation_failures", 0),
+                    "feedback": state.get("validation_feedback")
+                }
+            },
             "score_confidence": {
                 "status": "PASSED" if overall_status_normalized in ("VERIFIED", "PARTIAL") else "SKIPPED"
             },
@@ -506,83 +519,102 @@ def get_session_eval_metrics(session_id: str):
             }
         }
 
-    # Format Tasks
-    formatted_tasks = []
-    for t in task_results:
-        raw_chunks = t.get("retrieved_chunks", [])
-        
-        # Sort chunks by similarity descending (highest match first)
-        sorted_chunks = sorted(raw_chunks, key=lambda x: x.get("similarity", 0.0), reverse=True)
-        
-        trimmed_chunks = []
-        for c in sorted_chunks:
-            text = c.get("content", "")
-            if len(text) > 200:
-                # Word-boundary truncation
-                text = text[:197].rsplit(' ', 1)[0] + "..."
+        formatted_tasks = []
+        for t in task_results:
+            raw_chunks = t.get("retrieved_chunks", [])
+            sorted_chunks = sorted(raw_chunks, key=lambda x: x.get("similarity", 0.0), reverse=True)
+            formatted_chunks = []
+            for c in sorted_chunks:
+                text = c.get("content", "")
+                sim = c.get("similarity", 0.0)
+                metadata = c.get("metadata", {})
+                act = metadata.get("act_name", "Unknown Source")
+                sec = metadata.get("section_or_article", "")
+                title = f"{act} - {sec}" if sec else act
                 
-            sim = c.get("similarity", 0.0)
-            
-            trimmed_chunks.append({
-                "chunk_id": c.get("chunk_id", ""),
-                "act_name": c.get("metadata", {}).get("act_name", "Unknown Source"),
-                "section_or_article": c.get("metadata", {}).get("section_or_article", ""),
-                "page_start": c.get("metadata", {}).get("page_start", 1),
-                "similarity": sim,
-                "is_relevant": sim >= SIMILARITY_THRESHOLD,
-                "snippet": text
+                formatted_chunks.append({
+                    "chunk_id": c.get("chunk_id", ""),
+                    "title": title,
+                    "metadata": metadata,
+                    "similarity": sim,
+                    "is_relevant": sim >= SIMILARITY_THRESHOLD,
+                    "content": text
+                })
+
+            formatted_tasks.append({
+                "task_id": t.get("task_id", t.get("id", "Unknown")),
+                "question": t.get("question", ""),
+                "status": "PASSED" if t.get("sufficient") else "INSUFFICIENT",
+                "sufficient": t.get("sufficient", False),
+                "retrieved_count": len(raw_chunks),
+                "relevant_count": t.get("relevant_chunk_count", 0),
+                "max_similarity": t.get("max_similarity", 0.0),
+                "mean_similarity": t.get("mean_similarity", 0.0),
+                "reason": t.get("abstain_reason"),
+                "chunks": formatted_chunks
             })
+            
+        task_coverage = None
+        retrieval_relevance = None
+        if formatted_tasks:
+            sufficient = sum(1 for t in formatted_tasks if t["sufficient"])
+            task_coverage = round((sufficient / len(formatted_tasks)) * 100)
+            max_sims = [t["max_similarity"] for t in formatted_tasks if t["max_similarity"] is not None]
+            if max_sims:
+                retrieval_relevance = round((sum(max_sims) / len(max_sims)) * 100)
 
-        formatted_tasks.append({
-            "task_id": t.get("task_id", t.get("id", "Unknown")),
-            "question": t.get("question", ""),
-            "status": "PASSED" if t.get("sufficient") else "INSUFFICIENT",
-            "sufficient": t.get("sufficient", False),
-            "retrieved_count": len(raw_chunks),
-            "relevant_count": t.get("relevant_chunk_count", 0),
-            "max_similarity": t.get("max_similarity", 0.0),
-            "mean_similarity": t.get("mean_similarity", 0.0),
-            "reason": t.get("abstain_reason"),
-            "chunks": trimmed_chunks
-        })
-        
-    # Calculate Coverage & Retrieval Relevance
-    task_coverage = None
-    retrieval_relevance = None
-    if formatted_tasks:
-        sufficient = sum(1 for t in formatted_tasks if t["sufficient"])
-        task_coverage = round((sufficient / len(formatted_tasks)) * 100)
-        
-        max_sims = [t["max_similarity"] for t in formatted_tasks if t["max_similarity"] is not None]
-        if max_sims:
-            retrieval_relevance = round((sum(max_sims) / len(max_sims)) * 100)
+        conf_heuristic = None
+        if avg_conf is not None:
+            conf_heuristic = round(avg_conf * 100) if avg_conf <= 1.0 else round(avg_conf)
 
-    # Note: avg_conf might be a float 0.0 - 1.0, convert to 0-100 heuristic
-    conf_heuristic = None
-    if avg_conf is not None:
-        conf_heuristic = round(avg_conf * 100) if avg_conf <= 1.0 else round(avg_conf)
+        return {
+            "id": dict(row).get("id") if isinstance(row, sqlite3.Row) else row.get("id"),
+            "timestamp": dict(row).get("timestamp") if isinstance(row, sqlite3.Row) else row.get("timestamp"),
+            "raw_query": state.get("raw_query", dict(row).get("raw_query") if isinstance(row, sqlite3.Row) else ""),
+            "outcome": {
+                "status": overall_status_normalized if state else "UNAVAILABLE",
+                "is_abstained": abstain
+            },
+            "scores": {
+                "confidence_heuristic": conf_heuristic,
+                "task_coverage": task_coverage,
+                "retrieval_relevance": retrieval_relevance,
+                "claim_grounding": None,
+                "citation_accuracy": None
+            },
+            "tasks": formatted_tasks,
+            "nodes": node_details,
+            "abstention": {
+                "status": "ABSTAINED" if abstain else "NOT_ABSTAINED",
+                "reason": abstain_reason
+            },
+            "trace": trace
+        }
 
-    return {
-        "session_id": session_id,
-        "outcome": {
-            "status": overall_status_normalized if state else "UNAVAILABLE",
-            "is_abstained": abstain
-        },
-        "scores": {
-            "confidence_heuristic": conf_heuristic,
-            "task_coverage": task_coverage,
-            "retrieval_relevance": retrieval_relevance,
-            "claim_grounding": None,
-            "citation_accuracy": None
-        },
-        "tasks": formatted_tasks,
-        "nodes": node_details,
-        "abstention": {
-            "status": "ABSTAINED" if abstain else "NOT_ABSTAINED",
-            "reason": abstain_reason
-        },
-        "trace": trace
-    }
+    queries = []
+    for r in rows:
+        try:
+            row_dict = dict(r) if isinstance(r, sqlite3.Row) else r
+            full_state_json = row_dict.get("full_state")
+            state = json.loads(full_state_json) if full_state_json else {}
+            # Fallback to live session if missing full_state but it's the last row
+            if not state and r == rows[-1]:
+                state = session_store.get_session(session_id) or {}
+            
+            if state:
+                queries.append(_build_metrics(r, state))
+        except Exception:
+            continue
+            
+    # Always ensure the LIVE session is added if it hasn't been logged yet (e.g. still in progress)
+    live_state = session_store.get_session(session_id)
+    if live_state:
+        # Check if the live state's start_time or raw_query is already the last item in our queries list
+        live_query = live_state.get("raw_query")
+        if not queries or queries[-1].get("raw_query") != live_query:
+            queries.append(_build_metrics({"id": "live", "timestamp": "Now"}, live_state))
+
+    return {"queries": queries}
 
 
 @app.get("/eval/summary")

@@ -18,5 +18,11 @@ class Settings:
     LLM_MODEL: str = os.getenv("LLM_MODEL", "llama-3.3-70b-versatile")
     LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "groq")
     LLM_FALLBACK_MODEL: str = os.getenv("LLM_FALLBACK_MODEL", "llama-3.1-8b-instant")
+    
+    # Live Connector / fast models
+    GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
+    GEMINI_FAST_MODEL: str = os.getenv("GEMINI_FAST_MODEL", "gemini-3-flash")
+    MONGO_URI: str = os.getenv("MONGO_URI", "")
+    MONGO_DB: str = os.getenv("MONGO_DB", "ip_shakti")
 
 settings = Settings()

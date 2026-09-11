@@ -3,26 +3,23 @@ Formulation classification decision tree — 0 LLM calls.
 
 Gate sequence (from ip-sakti-formulation-classification.md):
 
-  Q1: External use only, no therapeutic claim?
+  Q1: Is this formulation exclusively for external use (e.g., a cream, lotion, or hair oil) making no therapeutic or disease-curing claims?
        ├─ Yes → COSMETIC
        └─ No  ↓
 
-  Q2: Consumed as food/supplement, no disease-cure claim?
+  Q2: Is this product consumed strictly as a food or dietary supplement (e.g., Ayurveda-Aahar) with no therapeutic claims, and it is NOT a modified classical Ayurvedic drug or proprietary medicine?
        ├─ Yes → AYURVEDA_AAHAR
        └─ No  ↓
 
-  Q3: Formulation and method exactly match a First-Schedule
-      authoritative text, unmodified?
+  Q3: Does this formulation and its manufacturing method exactly match an authoritative First-Schedule classical text (e.g., Ayurvedic Formulary of India) with absolutely NO modifications to ingredients, ratios, or delivery methods?
        ├─ Yes → CLASSICAL
        └─ No  ↓
 
-  Q4: Purified, standardised extract/fraction from a single plant
-      source, standardised to a defined active moiety?
+  Q4: Is this a purified, standardised extract or fraction from a single plant source, standardised to a defined active moiety (i.e., a Phytopharmaceutical)?
        ├─ Yes → PHYTOPHARMACEUTICAL
        └─ No  ↓
 
-  Q5: Deviates from classical text but follows Ayurvedic principles
-      (proprietary variant), no new clinical safety/efficacy data?
+  Q5: Does this formulation deviate from classical texts (e.g., modified ratio, new delivery method) but still follow Ayurvedic principles (Proprietary Ayurvedic Medicine), with NO new clinical safety or efficacy data generated?
        ├─ Yes → PROPRIETARY
        └─ No  → NEW_DRUG
 
@@ -40,38 +37,31 @@ from typing import Optional
 QUESTIONS: list[tuple[str, str, str, Optional[str]]] = [
     (
         "Q1",
-        "Is this formulation for external use only, with no therapeutic claim "
-        "(e.g. a cream, lotion, or hair oil)?",
+        "Is this formulation exclusively for external use (e.g., a cream, lotion, or hair oil) making no therapeutic or disease-curing claims?",
         "cosmetic",
         None,
     ),
     (
         "Q2",
-        "Is this formulation consumed as a food or dietary supplement, "
-        "making no disease-cure claim (e.g. a health supplement or Ayurveda-Aahar product)?",
+        "Is this product consumed strictly as a food or dietary supplement (e.g., Ayurveda-Aahar) with no therapeutic claims, and it is NOT a modified classical Ayurvedic drug or proprietary medicine?",
         "ayurveda_aahar",
         None,
     ),
     (
         "Q3",
-        "Does the formulation and its manufacturing method exactly match an authoritative "
-        "First-Schedule classical text (e.g. Ayurvedic Formulary of India), "
-        "with absolutely no modifications?",
+        "Does this formulation and its manufacturing method exactly match an authoritative First-Schedule classical text (e.g., Ayurvedic Formulary of India) with absolutely NO modifications to ingredients, ratios, or delivery methods?",
         "classical",
         None,
     ),
     (
         "Q4",
-        "Is this a purified, standardised extract or fraction from a single plant source, "
-        "standardised to a defined active moiety (phytopharmaceutical)?",
+        "Is this a purified, standardised extract or fraction from a single plant source, standardised to a defined active moiety (i.e., a Phytopharmaceutical)?",
         "phytopharmaceutical",
         None,
     ),
     (
         "Q5",
-        "Does this formulation deviate from the classical text but still follow Ayurvedic "
-        "principles (e.g. a proprietary combination or modified classical), "
-        "with no new clinical safety or efficacy data generated?",
+        "Does this formulation deviate from classical texts (e.g., modified ratio, new delivery method) but still follow Ayurvedic principles (Proprietary Ayurvedic Medicine), with NO new clinical safety or efficacy data generated?",
         "proprietary",
         "new_drug",   # "no" at Q5 → new_drug (last gate, both branches are leaves)
     ),

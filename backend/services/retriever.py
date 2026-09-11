@@ -23,18 +23,15 @@ from __future__ import annotations
 
 import os
 import json
+import re
 from typing import Optional
 
+import math
 from langchain_chroma import Chroma
 
-# Using fastembed directly via a minimal shim to avoid deprecation warnings
-# and Pydantic validation issues from langchain-community.
-from fastembed import TextEmbedding
+# Shared normalized embeddings shim (L2-normalizes all vectors, asserts norm~1 at startup)
+from services.embeddings import FastEmbedEmbeddings
 
-class FastEmbedEmbeddings:
-    def __init__(self, model_name): self._m = TextEmbedding(model_name)
-    def embed_documents(self, texts): return list(self._m.embed(texts))
-    def embed_query(self, text): return list(self._m.embed([text]))[0]
 
 # ── Configuration (all tunable via .env without code changes) ──────────────────
 
@@ -47,17 +44,36 @@ REGISTRY_PATH = os.path.abspath(
 
 EMBEDDING_MODEL: str = os.getenv("EMBEDDING_MODEL", "intfloat/multilingual-e5-large")
 
-# Abstention thresholds — tune empirically with the evaluation set.
-# Lowered from 0.45 → 0.35 and 3 → 1 after observing real evaluation scores
-# (max_similarity was 0.4084 on a working query, so 0.45 was too strict).
-SIMILARITY_THRESHOLD: float = float(os.getenv("SIMILARITY_THRESHOLD", "0.35"))
-MIN_RELEVANT_CHUNKS: int = int(os.getenv("MIN_RELEVANT_CHUNKS", "1"))
+# Suffix appended to collection names. Set to '_v2' after running migrate_vectors.py,
+# or '' to use legacy l2 collections (not recommended).
+COLLECTION_SUFFIX: str = os.getenv("COLLECTION_SUFFIX", "_v2")
+
+# Abstention gate thresholds baked from calibration.
+# SIMILARITY_FLOOR: minimum top-1 cosine similarity to allow an answer.
+# SCORE_MARGIN: top-1 must exceed median of candidate pool by at least this.
+# HIGH_CONFIDENCE_FLOOR: if top-1 >= this, skip the margin check entirely.
+#   Calibration data (fix.txt): e5-large cosine sits ~0.82-0.90 relevant vs
+#   ~0.72-0.78 unrelated, so 0.84 is solidly in the relevant zone.
+SIMILARITY_FLOOR: float = float(os.getenv("SIMILARITY_FLOOR", "0.82"))
+SCORE_MARGIN: float = float(os.getenv("SCORE_MARGIN", "0.05"))
+HIGH_CONFIDENCE_FLOOR: float = float(os.getenv("HIGH_CONFIDENCE_FLOOR", "0.84"))
+# Legacy aliases so existing env vars still work.
+SIMILARITY_THRESHOLD: float = SIMILARITY_FLOOR
+MIN_RELEVANT_CHUNKS: int = int(os.getenv("MIN_RELEVANT_CHUNKS", "2"))
+STRONG_SIMILARITY: float = float(os.getenv("STRONG_SIMILARITY", "0.70"))
 
 # Top-k chunks to retrieve per jurisdiction per query
 DEFAULT_K: int = int(os.getenv("RETRIEVAL_K", "8"))
 
 
-# ── Lazy-initialised Chroma handles ───────────────────────────────────────────
+# ── Lazy-initialised Chroma handles (thread-safe) ────────────────────────────
+# ChromaDB PersistentClient uses SQLite which is not safe for concurrent
+# multi-threaded writes/reads during initialisation.  A module-level lock
+# guards the one-time init; after that reads are safe because Chroma's
+# query path is read-only with respect to the collection metadata.
+
+import threading as _threading
+_chroma_init_lock = _threading.Lock()
 
 _national: Optional[Chroma] = None
 _international: Optional[Chroma] = None
@@ -65,25 +81,177 @@ _international: Optional[Chroma] = None
 
 def _build_collection(name: str) -> Chroma:
     embeddings = FastEmbedEmbeddings(model_name=EMBEDDING_MODEL)
-    return Chroma(
+    col = Chroma(
         collection_name=name,
         embedding_function=embeddings,
         persist_directory=CHROMA_DB_DIR,
+        collection_metadata={"hnsw:space": "cosine"},
     )
+    # Cache the actual space from live collection metadata.
+    meta = col._collection.metadata or {}
+    col._hnsw_space = meta.get("hnsw:space", "cosine").lower()
+    return col
 
 
 def _get_national() -> Chroma:
     global _national
     if _national is None:
-        _national = _build_collection("ip_sakti_national")
+        with _chroma_init_lock:
+            if _national is None:   # double-checked locking
+                _national = _build_collection("ip_sakti_national_current" + COLLECTION_SUFFIX)
     return _national
 
 
 def _get_international() -> Chroma:
     global _international
     if _international is None:
-        _international = _build_collection("ip_sakti_international")
+        with _chroma_init_lock:
+            if _international is None:
+                _international = _build_collection("ip_sakti_international_current" + COLLECTION_SUFFIX)
     return _international
+
+
+def _eager_init_collections() -> None:
+    """Pre-warm both collections at module load so parallel threads never race."""
+    try:
+        _get_national()
+        _get_international()
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning("Chroma eager-init failed: %s", e)
+
+_eager_init_collections()
+
+
+# ── Distance → similarity ──────────────────────────────────────────────────────
+
+def distance_to_similarity(distance: float, space: Optional[str] = None) -> float:
+    """
+    Convert a Chroma distance into cosine similarity in [0, 1].
+
+    cosine space: Chroma reports (1 - cosine_sim) in [0, 1]. sim = 1 - d.
+    l2 space (normalized vectors only): Chroma reports squared-L2 (d^2).
+      For unit vectors: d^2 = 2*(1-cosine_sim), so sim = 1 - d/2.
+      d > 4.0 means unnormalized vectors — logged as an error (should have
+      been caught by the startup assertion in embeddings.py).
+    """
+    import logging as _logging
+    d = float(distance)
+    space = (space or "cosine").lower()
+    if space in ("cosine", "cos"):
+        sim = 1.0 - d
+    else:
+        # l2: d is squared-L2
+        if d > 4.0:
+            _logging.getLogger(__name__).error(
+                "distance_to_similarity: d=%.4f > 4.0 in l2 space. "
+                "Vectors are likely unnormalized. Check embeddings shim.", d
+            )
+        sim = 1.0 - (d / 2.0)
+    return max(0.0, min(1.0, sim))
+
+
+def _chunk_dict(doc, distance: Optional[float], *, source: str = "chroma", sim_cap: Optional[float] = None) -> dict:
+    raw_distance = None if distance is None else float(distance)
+    if raw_distance is None:
+        similarity: Optional[float] = None
+    else:
+        similarity = distance_to_similarity(raw_distance)
+    if sim_cap is not None and similarity is not None:
+        similarity = min(similarity, sim_cap)
+    meta = doc.metadata if hasattr(doc, "metadata") else {}
+    return {
+        "chunk_id": meta.get("chunk_id", ""),
+        "document_id": meta.get("document_id", ""),
+        "content": doc.page_content if hasattr(doc, "page_content") else str(doc),
+        "metadata": {
+            "act_name": meta.get("act_name", ""),
+            "act_id": meta.get("act_id", ""),
+            "section_or_article": meta.get("section_or_article", ""),
+            "page_start": meta.get("page_start", 1),
+            "page_end": meta.get("page_end", 1),
+            "version": meta.get("version", ""),
+            "source_type": meta.get("source_type", ""),
+            "jurisdiction": meta.get("jurisdiction", ""),
+            "language": meta.get("language", "en"),
+            "last_verified_date": meta.get("last_verified_date", ""),
+            # Preserve internal routing flags so is_sufficient_coverage can see them
+            "_is_direct_shortcut": meta.get("_is_direct_shortcut", False),
+        },
+        "similarity": round(similarity, 4) if similarity is not None else None,
+        "raw_distance": raw_distance,
+        "source": source,
+    }
+
+
+def _chunk_from_get(meta: dict, doc_text: str) -> dict:
+    """Build a chunk dict for keyword-fallback results. similarity is None."""
+    return {
+        "chunk_id": meta.get("chunk_id", ""),
+        "document_id": meta.get("document_id", ""),
+        "content": doc_text,
+        "metadata": {
+            "act_name": meta.get("act_name", ""),
+            "act_id": meta.get("act_id", ""),
+            "section_or_article": meta.get("section_or_article", ""),
+            "page_start": meta.get("page_start", 1),
+            "page_end": meta.get("page_end", 1),
+            "version": meta.get("version", ""),
+            "source_type": meta.get("source_type", ""),
+            "jurisdiction": meta.get("jurisdiction", ""),
+            "language": meta.get("language", "en"),
+            "last_verified_date": meta.get("last_verified_date", ""),
+        },
+        "similarity": None,
+        "raw_distance": None,
+        "source": "keyword",
+    }
+
+
+def _parse_section_ref(text: str):
+    """
+    Parse a section reference from either a query string or a metadata label.
+    '3(p)'                          -> ('3', 'p')
+    'section 3(p)'                  -> ('3', 'p')
+    'Section 3: What are not...'    -> ('3', None)
+    Returns (base_num, clause) or (None, None).
+    """
+    m = re.search(r'section\s+([0-9a-zA-Z]+)(?:\(([a-zA-Z0-9]+)\))?', text, re.IGNORECASE)
+    if m:
+        return m.group(1).lower(), (m.group(2).lower() if m.group(2) else None)
+    m2 = re.match(r'^([0-9]+)(?:\(([a-zA-Z0-9]+)\))?$', text.strip())
+    if m2:
+        return m2.group(1), (m2.group(2).lower() if m2.group(2) else None)
+    return None, None
+
+
+def _section_anchor_match(chunk: dict, query_act: Optional[str], base_num: str, clause: Optional[str]) -> bool:
+    """
+    Return True if chunk matches act + base section number.
+    Clause presence in content is a confidence boost, not required.
+    Act name match is required if query_act is provided.
+    """
+    meta = chunk.get("metadata", {})
+    chunk_act = meta.get("act_name", "").lower()
+    if query_act and query_act.lower() not in chunk_act:
+        return False
+    meta_base, _ = _parse_section_ref(meta.get("section_or_article", ""))
+    return meta_base == base_num
+
+
+def _has_section_anchor(chunks: list[dict], task_question: str, query_act: Optional[str] = None) -> bool:
+    """Return True if any chunk matches a section ref found in task_question."""
+    section_refs = re.findall(r'section\s+([0-9a-zA-Z()+]+)', task_question, re.IGNORECASE)
+    if not section_refs:
+        return False
+    for ref in section_refs:
+        base, clause = _parse_section_ref(ref)
+        if base is None:
+            continue
+        for c in chunks:
+            if _section_anchor_match(c, query_act, base, clause):
+                return True
+    return False
 
 
 # ── Core retrieval ─────────────────────────────────────────────────────────────
@@ -164,66 +332,81 @@ def retrieve(
             pass # Fall back to hardcoded sets if registry is unavailable or malformed
 
     results = []
+    # Use standard k for direct retrieval
+    candidate_k = k
+
     # If no filtering can be applied (either originally empty, or zeroed out by registry check), do open retrieval
     if not primary_acts and not boundary_acts:
-        results = collection.similarity_search_with_score(query, k=k)
+        results = collection.similarity_search_with_score(query, k=candidate_k, filter={"is_latest_consolidated": True})
     else:
-        k_primary = min(k, int(k * 0.8)) # e.g. 12 if k=15
-        k_boundary = k - k_primary
+        k_primary = min(candidate_k, int(candidate_k * 0.8)) # e.g. 12 if k=15
+        k_boundary = candidate_k - k_primary
         
         if primary_acts:
-            results.extend(collection.similarity_search_with_score(query, k=k_primary, filter={"act_name": {"$in": list(primary_acts)}}))
+            f = {"$and": [{"act_name": {"$in": list(primary_acts)}}, {"is_latest_consolidated": True}]}
+            results.extend(collection.similarity_search_with_score(query, k=k_primary, filter=f))
             
         if boundary_acts and k_boundary > 0:
-            results.extend(collection.similarity_search_with_score(query, k=k_boundary, filter={"act_name": {"$in": list(boundary_acts)}}))
+            f = {"$and": [{"act_name": {"$in": list(boundary_acts)}}, {"is_latest_consolidated": True}]}
+            results.extend(collection.similarity_search_with_score(query, k=k_boundary, filter=f))
+
 
     # Deduplicate by chunk_id and content
     seen_ids = set()
-    seen_texts = set()
     unique_results = []
-    # Sort results by distance (score is distance in Chroma results initially)
-    results.sort(key=lambda x: x[1])
     
     for doc, distance in results:
         chunk_id = doc.metadata.get("chunk_id", "")
-        content = doc.page_content.strip()
-        
-        if chunk_id in seen_ids or content in seen_texts:
+        if chunk_id in seen_ids:
             continue
-            
         seen_ids.add(chunk_id)
-        seen_texts.add(content)
         unique_results.append((doc, distance))
-
-    # Slice to top K overall unique
+    # Sort unique results by distance (lower is better in Chroma usually, assuming L2/cosine distance)
+    # Then map it to a 0-1 similarity score where 1 is identical.
+    # Note: FastEmbed embeddings are typically normalized, so distance D is bounded. 
+    # For cosine distance, similarity is 1 - distance. If L2, it can be slightly different.
+    # We will sort by distance (lowest first) and assume similarity = 1 - distance
+    # or just use a simple heuristic if distance > 1.
+    unique_results.sort(key=lambda x: x[1])
     unique_results = unique_results[:k]
 
     chunks: list[dict] = []
     for doc, distance in unique_results:
-        DISTANCE_METRIC: str = os.getenv("DISTANCE_METRIC", "l2")
-        if DISTANCE_METRIC == "cosine":
-            similarity = max(0.0, 1.0 - float(distance) / 2.0)
-        else:
-            L2_SCALE: float = float(os.getenv("L2_DISTANCE_SCALE", "400.0"))
-            similarity = max(0.0, 1.0 - float(distance) / L2_SCALE)
+        chunk = _chunk_dict(doc, distance, source="chroma")
+        if not chunk["metadata"].get("jurisdiction"):
+            chunk["metadata"]["jurisdiction"] = jurisdiction
+        chunks.append(chunk)
 
-        chunks.append({
-            "chunk_id": doc.metadata.get("chunk_id", ""),
-            "document_id": doc.metadata.get("document_id", ""),
-            "content": doc.page_content,
-            "metadata": {
-                "act_name": doc.metadata.get("act_name", ""),
-                "section_or_article": doc.metadata.get("section_or_article", ""),
-                "page_start": doc.metadata.get("page_start", 1),
-                "page_end": doc.metadata.get("page_end", 1),
-                "version": doc.metadata.get("version", ""),
-                "source_type": doc.metadata.get("source_type", ""),
-                "jurisdiction": doc.metadata.get("jurisdiction", jurisdiction),
-                "language": doc.metadata.get("language", "en"),
-                "last_verified_date": doc.metadata.get("last_verified_date", ""),
-            },
-            "similarity": round(similarity, 4),
-        })
+    # --- Keyword fallback: never allowed to satisfy sufficiency on its own ---
+    max_sim = max([c["similarity"] for c in chunks]) if chunks else 0.0
+    if max_sim < SIMILARITY_THRESHOLD and (primary_acts or boundary_acts):
+        keywords = [w for w in query.replace('"', '').replace("'", '').split() if len(w) > 4]
+        fallback_results = []
+        
+        acts_to_scan = list(primary_acts) + list(boundary_acts)
+        for act in acts_to_scan[:3]:
+            try:
+                act_f = {"$and": [{"act_name": {"$eq": act}}, {"is_latest_consolidated": True}]}
+                docs = collection.get(where=act_f)
+                if docs and docs.get("documents"):
+                    for i, doc_text in enumerate(docs["documents"]):
+                        doc_lower = doc_text.lower()
+                        match_count = sum(1 for kw in keywords[:5] if kw.lower() in doc_lower)
+                        if match_count >= min(2, len(keywords[:5])):
+                            meta = docs["metadatas"][i] if docs.get("metadatas") else {}
+                            chunk_id = meta.get("chunk_id", "")
+                            if not any(c["chunk_id"] == chunk_id for c in chunks):
+                                chunks.append(_chunk_from_get(meta, doc_text))
+                                fallback_results.append(chunk_id)
+                        if len(fallback_results) >= 3:
+                            break
+            except Exception:
+                pass
+            if len(fallback_results) >= 3:
+                break
+
+    # Re-sort: vector chunks (have similarity) before keyword chunks (similarity=None)
+    chunks.sort(key=lambda x: (x["similarity"] is None, -(x["similarity"] or 0)))
 
     return chunks
 
@@ -234,42 +417,63 @@ def is_sufficient_coverage(chunks: list[dict], task_question: str = "") -> tuple
     """
     Evaluate whether retrieval coverage is sufficient to generate a safe answer.
 
+    Gate semantics: "we have at least one chunk that clearly answers this."
+    Uses a relative gate: top-1 >= SIMILARITY_FLOOR AND
+                          top-1 - median(pool) >= SCORE_MARGIN.
+
+    Section-anchor matching downgrades confidence (adds a note to the reason)
+    rather than hard-abstaining when semantic score is strong.
+
+    Keyword-only chunks (similarity=None) never count toward sufficiency.
+
     Returns (sufficient: bool, reason: str).
-
-    Abstain if ANY of:
-      - No chunks retrieved at all.
-      - max similarity < SIMILARITY_THRESHOLD (best match is too weak).
-      - fewer than MIN_RELEVANT_CHUNKS above SIMILARITY_THRESHOLD
-        (not enough grounding even if the best match looks okay).
-
-    This avoids the failure mode of 15 mediocre chunks passing a count check,
-    as well as the failure mode of one very good chunk being treated as sufficient.
     """
     if not chunks:
         return False, "No chunks retrieved from the corpus."
 
-    similarities = [c["similarity"] for c in chunks]
-    max_sim = max(similarities)
-    relevant = [s for s in similarities if s >= SIMILARITY_THRESHOLD]
+    # Only vector chunks count toward the gate
+    vector_chunks = [c for c in chunks if c.get("source") != "keyword" and c.get("similarity") is not None]
+    if not vector_chunks:
+        return False, "Only keyword fallback results were found; no semantic match available."
 
-    if max_sim < SIMILARITY_THRESHOLD:
+    similarities = [c["similarity"] for c in vector_chunks]
+    top1 = max(similarities)
+    import statistics
+    pool_median = statistics.median(similarities)
+    margin = top1 - pool_median
+
+    if top1 < SIMILARITY_FLOOR:
         return False, (
-            f"Corpus coverage insufficient: best match similarity is {max_sim:.3f}, "
-            f"below the minimum threshold of {SIMILARITY_THRESHOLD}. "
+            f"Corpus coverage insufficient: best match similarity is {top1:.3f}, "
+            f"below the minimum floor of {SIMILARITY_FLOOR}. "
             "The corpus may not contain this topic — please consult a qualified IP attorney."
         )
 
-    if len(relevant) < MIN_RELEVANT_CHUNKS:
+    # Margin bypass: with properly normalized cosine vectors, a top-1 similarity
+    # >= HIGH_CONFIDENCE_FLOOR is strong evidence on its own — the spread check
+    # is less meaningful when the corpus is dense around a single section.
+    if top1 >= HIGH_CONFIDENCE_FLOOR:
+        # High-confidence hit — margin check not required
+        pass
+    elif margin < SCORE_MARGIN:
         return False, (
-            f"Only {len(relevant)} chunk(s) above the relevance threshold "
-            f"({SIMILARITY_THRESHOLD}); need at least {MIN_RELEVANT_CHUNKS} for a "
-            "grounded answer. The corpus coverage for this specific question is thin."
+            f"Retrieval signal is weak: top-1 similarity {top1:.3f} only "
+            f"{margin:.3f} above pool median ({pool_median:.3f}); "
+            f"need margin >= {SCORE_MARGIN} or top-1 >= {HIGH_CONFIDENCE_FLOOR}. "
+            "Results may not be specific enough."
         )
 
+    # Section anchor: note if requested section not clearly matched, but don't abstain
+    anchor_note = ""
+    anchored = _has_section_anchor(vector_chunks, task_question)
+    if re.search(r'section\s+[0-9]', task_question, re.IGNORECASE) and not anchored:
+        anchor_note = " (Note: requested section not found as a direct metadata match; answer drawn from semantically similar provisions.)"
+
+    relevant_chunks = [c for c in vector_chunks if c["similarity"] >= SIMILARITY_FLOOR]
+
     # Task-specific sufficiency (e.g., if task requires case law)
+    
     if "case law" in task_question.lower() or "cases" in task_question.lower() or "judgment" in task_question.lower():
-        # Iterate over the actual chunk dictionaries that met the relevance threshold
-        relevant_chunks = [c for c in chunks if c["similarity"] >= SIMILARITY_THRESHOLD]
         has_case_law = any(
             "case" in c.get("metadata", {}).get("source_type", "").lower() or 
             "judgment" in c.get("metadata", {}).get("source_type", "").lower() or
@@ -278,6 +482,43 @@ def is_sufficient_coverage(chunks: list[dict], task_question: str = "") -> tuple
         )
         if not has_case_law:
             return False, "Task requires case law, but no case law was found in the retrieved evidence."
+
+    # Exact Section match enforcement: downgrade confidence instead of abstaining
+    section_matches = re.findall(r"section\s+([0-9a-zA-Z\(\)]+)", task_question, re.IGNORECASE)
+    if section_matches:
+        for sec in section_matches:
+            has_exact = False
+            sec_lower = sec.lower()
+            sec_base = sec_lower.split('(')[0] if '(' in sec_lower else sec_lower
+            clause = sec_lower[len(sec_base):] # e.g., "(p)"
+            
+            for c in relevant_chunks:
+                meta_sec = c.get("metadata", {}).get("section_or_article", "").lower()
+                content = c.get("content", "").lower()
+                
+                meta_base, meta_clause = _parse_section_ref(meta_sec)
+                
+                if meta_base == sec_base:
+                    if not clause:
+                        has_exact = True
+                        break
+                    
+                    # If clause requested, check content or metadata
+                    clause_variants = [
+                        clause, 
+                        clause.replace("(", " ("), 
+                        f"clause {clause}", 
+                        f"clause {clause.replace('(', '').replace(')', '')}"
+                    ]
+                    if meta_clause == clause.strip("()") or any(v in content for v in clause_variants):
+                        has_exact = True
+                        break
+                    
+            if not has_exact:
+                anchor_note += f" (Note: requested Section {sec} was not definitively found, relying on semantic matches.)"
+                
+    if anchor_note:
+        return True, anchor_note
 
     return True, ""
 

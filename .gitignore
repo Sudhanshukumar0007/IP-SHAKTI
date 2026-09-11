@@ -21,3 +21,20 @@ scratch_*.txt
 audit.md
 frontend_audit.md
 *audit.md
+# Irrelevant files
+backend/eval_results.csv
+backend/eval_summary.md
+backend/governed_by_map.json
+backend/manual_ingest_sec3.py
+backend/migrate_vectors.py
+backend/patch_phase2.py
+backend/patch_retriever.py
+backend/test_chroma.py
+fix.txt
+fix2.txt
+query_response.txt
+questions.md
+restructure.ps1
+presentation.md
+graphify-out/
+
